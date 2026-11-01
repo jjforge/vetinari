@@ -6,6 +6,7 @@ import { type EventLogTailAt, tailEventLog } from "./dashboard-live-tail.ts";
 import type { ProjectPointer } from "./registry.ts";
 import type { OrchestratorEvent } from "./event-log.ts";
 import { hostLogger, hostLogTarget } from "./log.ts";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RouteHandler } from "./dashboard-http.ts";
 
 /** The per-project SSE debounce window: view-relevant appends landing within it
@@ -28,6 +29,90 @@ export const MAX_EVENT_CONNECTIONS = 16;
 /** The live-update connections currently open — process-wide, since a process runs one
  * dashboard server. Counted from admission until the request's `close`. */
 let openEventConnections = 0;
+
+/**
+ * Admit a live-update connection under the one cap both `/api/events` and `/api/v1/events` share,
+ * or refuse it with `503` and return false. A refusal goes out before any SSE header, so a refused
+ * client never sees a `200`, and neither takes nor frees a slot. An admitted connection's slot is
+ * released on the request's `close` however the handler exits — registered here, before any work
+ * that can throw — and `teardown` closes whatever the handler set up by then. `once`, so a repeated
+ * `close` can't release the slot twice and drift the count below the connections actually open.
+ */
+const admitEventConnection = (req: IncomingMessage, res: ServerResponse, teardown: () => void): boolean => {
+  if (openEventConnections >= MAX_EVENT_CONNECTIONS) {
+    res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`too many live-update connections (max ${MAX_EVENT_CONNECTIONS})`);
+    return false;
+  }
+  openEventConnections++;
+  req.once("close", () => {
+    openEventConnections--;
+    teardown();
+    res.end();
+  });
+  return true;
+};
+
+// A log's current end — its byte size and inode — or `{ 0, 0 }` when it doesn't exist yet.
+const logEndOf = (logFile: string): EventLogTailAt => {
+  try {
+    const { size, ino } = statSync(logFile);
+    return { offset: size, ino };
+  } catch {
+    return { offset: 0, ino: 0 };
+  }
+};
+
+/**
+ * One connection's per-project read of the live logs: where it last read each log (its byte
+ * offset and inode, so a replaced or truncated log is read from its start), and the debounce that
+ * coalesces each project's `viewRelevantEvents` survivors into one frame per `DEBOUNCE_MS` window.
+ * `frame` renders a project's window of survivors as the SSE frame `flush` writes. `seed` starts a
+ * project at its log's current end; `push` reads what was appended since; `close` drops the timers.
+ */
+const projectLogFeed = (res: ServerResponse, frame: (project: string, events: OrchestratorEvent[]) => string) => {
+  const tailAt = new Map<string, EventLogTailAt>();
+  // The debounce buffers: the view-relevant events collected for a project since its last
+  // flush, and the pending timer that will flush them as one frame.
+  const pending = new Map<string, OrchestratorEvent[]>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // Flush a project's debounced survivors as a single SSE frame. Emits nothing when the
+  // response has ended or nothing view-relevant accumulated (a window of pure noise).
+  const flush = (project: string) => {
+    timers.delete(project);
+    const events = pending.get(project) ?? [];
+    pending.delete(project);
+    if (res.writableEnded || !events.length) return;
+    res.write(frame(project, events));
+  };
+
+  return {
+    seed: (project: string, logFile: string) => tailAt.set(project, logEndOf(logFile)),
+    push: (project: string, logFile: string) => {
+      // A watch callback can fire in the gap between the client disconnecting and the
+      // watchers closing; never write to an already-ended response.
+      if (res.writableEnded) return;
+      const { events, at } = tailEventLog(logFile, tailAt.get(project) ?? { offset: 0, ino: 0 });
+      tailAt.set(project, at);
+      const relevant = viewRelevantEvents(events);
+      if (!relevant.length) return;
+      // Buffer the survivors and arm a single debounce timer per project; a burst of
+      // appends within the window coalesces into the one frame `flush` writes.
+      const buffered = pending.get(project) ?? [];
+      buffered.push(...relevant);
+      pending.set(project, buffered);
+      if (!timers.has(project))
+        timers.set(
+          project,
+          setTimeout(() => flush(project), DEBOUNCE_MS),
+        );
+    },
+    close: () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+    },
+  };
+};
 
 /**
  * `GET /api/events` — the live update stream (ADR 0008). The server `fs.watch`es
@@ -54,22 +139,8 @@ let openEventConnections = 0;
  */
 export const handleEvents: RouteHandler = (req, res, url, deps) => {
   if (!(req.method === "GET" && url.pathname === "/api/events")) return false;
-  // Refuse past the cap before any SSE header goes out, so a refused client never sees a
-  // `200`, and before any watcher arms; a refusal neither takes nor frees a slot.
-  if (openEventConnections >= MAX_EVENT_CONNECTIONS) {
-    res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
-    res.end(`too many live-update connections (max ${MAX_EVENT_CONNECTIONS})`);
-    return true;
-  }
-  openEventConnections++;
   const watchers: FSWatcher[] = [];
-  // Per-project byte position in its live log — where this connection last read, and the
-  // inode it read it from, so a replaced (archived) or truncated log is read from its start.
-  const tailAt = new Map<string, EventLogTailAt>();
-  // The debounce buffers: the view-relevant events collected for a project since its last
-  // flush, and the pending timer that will flush them as one frame.
-  const pending = new Map<string, OrchestratorEvent[]>();
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const feed = projectLogFeed(res, (project, events) => `data: ${JSON.stringify({ project, events })}\n\n`);
   // The live-tail arm (#124): the same watch fires on each running agent's
   // `activity-<id>.jsonl` append (they share the watched logs dir), so alongside the
   // orchestrator frame we recompute the project's merged tail snapshot and push it as a
@@ -88,19 +159,15 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   let hostPending: string[] = [];
   let hostTimer: ReturnType<typeof setTimeout> | undefined;
 
-  // Release the slot on `close` however the handler exits — registered before any work that can
-  // throw (the headers, the registry read, a malformed pointer, a watcher arming), so a throw
-  // after admission can't hold its slot for good. Teardown covers only what was set up by then:
-  // the collections start empty, so a part never reached closes nothing. `once`, so a repeated
-  // `close` can't release the slot twice and drift the count below the connections actually open.
-  req.once("close", () => {
-    openEventConnections--;
+  // Refuse past the cap before any watcher arms. Teardown covers only what was set up by the
+  // time the request closes: the collections start empty, so a part never reached closes nothing.
+  const admitted = admitEventConnection(req, res, () => {
     for (const watcher of watchers) watcher.close();
-    for (const timer of timers.values()) clearTimeout(timer);
+    feed.close();
     for (const timer of tailTimers.values()) clearTimeout(timer);
     if (hostTimer) clearTimeout(hostTimer);
-    res.end();
   });
+  if (!admitted) return true;
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -113,52 +180,12 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // watching a live stream.
   res.write("retry: 3000\n: connected\n\n");
 
-  // A log's current end — its byte size and inode — or `{ 0, 0 }` when it doesn't exist yet.
-  const logEndOf = (logFile: string): EventLogTailAt => {
-    try {
-      const { size, ino } = statSync(logFile);
-      return { offset: size, ino };
-    } catch {
-      return { offset: 0, ino: 0 };
-    }
-  };
-
   const readLog = (logFile: string): string => {
     try {
       return existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
     } catch {
       return "";
     }
-  };
-
-  // Flush a project's debounced survivors as a single SSE frame. Emits nothing when the
-  // response has ended or nothing view-relevant accumulated (a window of pure noise).
-  const flush = (project: string) => {
-    timers.delete(project);
-    const events = pending.get(project) ?? [];
-    pending.delete(project);
-    if (res.writableEnded || !events.length) return;
-    res.write(`data: ${JSON.stringify({ project, events })}\n\n`);
-  };
-
-  const push = (project: string, logFile: string) => {
-    // A watch callback can fire in the gap between the client disconnecting and the
-    // watchers closing; never write to an already-ended response.
-    if (res.writableEnded) return;
-    const { events, at } = tailEventLog(logFile, tailAt.get(project) ?? { offset: 0, ino: 0 });
-    tailAt.set(project, at);
-    const relevant = viewRelevantEvents(events);
-    if (!relevant.length) return;
-    // Buffer the survivors and arm a single debounce timer per project; a burst of
-    // appends within the window coalesces into the one frame `flush` writes.
-    const buffered = pending.get(project) ?? [];
-    buffered.push(...relevant);
-    pending.set(project, buffered);
-    if (!timers.has(project))
-      timers.set(
-        project,
-        setTimeout(() => flush(project), DEBOUNCE_MS),
-      );
   };
 
   // Recompute a project's live-tail snapshot and push it as a named `tail` frame when it
@@ -215,7 +242,7 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     const logFile = logFileOf(pointer.baseLocation);
     // Seed at the current end so the backlog isn't re-pushed on connect (the page
     // already loaded it); the append itself is the "something happened" signal.
-    tailAt.set(pointer.project, logEndOf(logFile));
+    feed.seed(pointer.project, logFile);
     // Watch the logs directory, not the file, so a not-yet-created log or a
     // rotation still registers. A missing base location is skipped, not fatal.
     const logsDir = dirname(logFile);
@@ -223,7 +250,7 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
     try {
       watchers.push(
         watch(logsDir, () => {
-          push(pointer.project, logFile);
+          feed.push(pointer.project, logFile);
           pushTail(pointer.project, pointer);
         }),
       );
@@ -267,5 +294,48 @@ export const handleEvents: RouteHandler = (req, res, url, deps) => {
   // `{ project, events }` shape is kept, sent empty since nothing reads it.
   if (!res.writableEnded) res.write(`data: ${JSON.stringify({ project: null, events: [] })}\n\n`);
 
+  return true;
+};
+
+/**
+ * `GET /api/v1/events` — the external API's change doorbell (ADR 0027, docs/api.md). It carries no
+ * event payload and no named frame: on connect, one `{"project":null}` frame (re-fetch everything —
+ * the same gap-healing ring as `/api/events`' connect frame); after that, one `{"project":"<name>"}`
+ * frame per debounced window in which that project's live log gained a view-relevant event, so the
+ * consumer re-fetches `/api/v1/campaign` for it. Same watch, offset seeding, debounce and connection
+ * cap as `/api/events` — one cap across both routes.
+ */
+export const handleApiV1Events: RouteHandler = (req, res, url, deps) => {
+  if (!(req.method === "GET" && url.pathname === "/api/v1/events")) return false;
+  const watchers: FSWatcher[] = [];
+  const feed = projectLogFeed(res, (project) => `data: ${JSON.stringify({ project })}\n\n`);
+  const admitted = admitEventConnection(req, res, () => {
+    for (const watcher of watchers) watcher.close();
+    feed.close();
+  });
+  if (!admitted) return true;
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  res.write("retry: 3000\n\n");
+
+  for (const pointer of listProjects(deps.configDir)) {
+    const logFile = logFileOf(pointer.baseLocation);
+    feed.seed(pointer.project, logFile);
+    const logsDir = dirname(logFile);
+    if (!existsSync(logsDir)) continue;
+    try {
+      watchers.push(watch(logsDir, () => feed.push(pointer.project, logFile)));
+    } catch (e) {
+      logger.log("dashboard-events-watch-failed", { project: pointer.project, error: String(e) });
+    }
+  }
+
+  // The connect ring, last — after every offset is seeded and every watcher armed — exactly as
+  // `/api/events` rings it, so no append can fall between the consumer's re-fetch and the watch.
+  if (!res.writableEnded) res.write(`data: ${JSON.stringify({ project: null })}\n\n`);
   return true;
 };

@@ -12,7 +12,7 @@ import { handleApiIssue } from "./dashboard-route-api-issue.ts";
 import { handleApiV1Campaign, handleApiV1Projects } from "./dashboard-route-api-v1.ts";
 import { handleLanding } from "./dashboard-route-landing.ts";
 import { handleFeed } from "./dashboard-route-feed.ts";
-import { handleEvents } from "./dashboard-route-events.ts";
+import { handleApiV1Events, handleEvents } from "./dashboard-route-events.ts";
 import { handleAnswer } from "./dashboard-route-answer.ts";
 import { handlePrune, handlePrunePreview } from "./dashboard-route-prune.ts";
 import { handleGraft, handleGraftPreview } from "./dashboard-route-graft.ts";
@@ -54,6 +54,7 @@ const routes: RouteHandler[] = [
   handleStop,
   handleApiV1Projects,
   handleApiV1Campaign,
+  handleApiV1Events,
   handlePage,
 ];
 

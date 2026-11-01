@@ -159,6 +159,35 @@ test("a gate runs under timeout with the default limit of 3600 seconds (#531)", 
   assert.deepEqual(calls, ["timeout 3600 sh -c 'make test'"]);
 });
 
+test("a gate's timeoutSeconds sets its limit, its command is single-quoted, and the diff probe stays bare (#531)", async () => {
+  const { sbx, calls } = recordingSandbox();
+  await runGates(gateCfg([{ cmd: `echo "it's" && run-tests`, timeoutSeconds: 30 }]), sbx);
+  assert.deepEqual(calls, ["git diff --name-only base...HEAD", `timeout 30 sh -c 'echo "it'\\''s" && run-tests'`]);
+});
+
+test("a gate that runs past its limit is red, its report ending 'timed out after <n>s' (#531)", async () => {
+  const gate: GateSpec = { cmd: "make test", timeoutSeconds: 30 };
+  const cfg = gateCfg([gate]);
+  const { sbx } = recordingSandbox((cmd) => (cmd === "timeout 30 sh -c 'make test'" ? 124 : 0));
+  const result = await runGates(cfg, sbx, { all: true });
+  assert.equal(result.green, false);
+  assert.equal(result.failed, gate);
+  assert.ok(result.report.startsWith("$ make test\n"), result.report);
+  assert.equal(result.report.split("\n").at(-1), "timed out after 30s");
+  const results = readEventLog(cfg).filter((e): e is GateResultEvent => e.event === "gate-result");
+  assert.deepEqual(
+    results.map((e) => [e.cmd, e.exitCode]),
+    [["make test", 124]],
+  );
+});
+
+test("a red gate that did not time out has no timeout line in its report (#531)", async () => {
+  const { sbx } = recordingSandbox(() => 1);
+  const { green, report } = await runGates(gateCfg([{ cmd: "make test", timeoutSeconds: 30 }]), sbx, { all: true });
+  assert.equal(green, false);
+  assert.doesNotMatch(report, /timed out/);
+});
+
 test("the wave-merge gate (no taskId) writes no per-task activity — not even a gate-check", async () => {
   const cfg = gateCfg([{ cmd: "tsc --noEmit" }]);
   const sbx = gateSandbox({ "tsc --noEmit": 0 });

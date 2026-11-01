@@ -124,7 +124,9 @@ export async function runGates(
       const evidence = tapFailures(stdout) ?? tail(stdout, 200);
       return {
         green: false,
-        report: `$ ${g.cmd}\n${evidence}\n${tail(res.stderr ?? "", 100)}`,
+        // `timeout` exits 124 on expiry. The note goes last: the merged-base gate and the per-merge
+        // retry prompt keep only the report's tail (#531).
+        report: `$ ${g.cmd}\n${evidence}\n${tail(res.stderr ?? "", 100)}` + (res.exitCode === 124 ? `\ntimed out after ${limit}s` : ""),
         failed: g,
         exitCode: res.exitCode,
       };

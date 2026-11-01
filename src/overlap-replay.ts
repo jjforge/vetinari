@@ -14,7 +14,7 @@
  * temporary `git clone --shared` under the OS temp dir, removed when the run ends.
  */
 import { execFile, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -362,10 +362,19 @@ const pct = (rate: number | null) => (rate === null ? "n/a" : `${Math.round(rate
 const evidence = (t: OverlapKeyTally) =>
   `${t.pairs} pairs: ${t.clean} clean, ${t.collides} collide, ${t.indeterminate} indeterminate; collision rate ${pct(t.rate)} (${t.collides} of ${t.clean + t.collides} measured)`;
 
-/** The config lens's report: thresholds first, then each key under what its numbers suggest. */
-export function renderOverlapReport(r: OverlapReplay, waivedFiles: readonly string[] = []): string {
+/**
+ * The config lens's report: thresholds first, then each key under what its numbers suggest. A
+ * waive candidate `isDirectory` says is a directory (a package key) is listed as not waivable,
+ * since `waivedFiles` takes only single files.
+ */
+export function renderOverlapReport(
+  r: OverlapReplay,
+  waivedFiles: readonly string[] = [],
+  isDirectory: (key: string) => boolean = () => false,
+): string {
   const waived = new Set(waivedFiles);
   const pick = (v: OverlapVerdict) => r.keys.filter((t) => !waived.has(t.key) && overlapVerdict(t) === v);
+  const candidates = pick("waive-candidate");
   const section = (title: string, rows: string[]) => (rows.length ? [``, `## ${title}`, ...rows] : []);
   return [
     `# Config lens: how often tickets sharing a file really conflicted`,
@@ -380,7 +389,13 @@ export function renderOverlapReport(r: OverlapReplay, waivedFiles: readonly stri
       : []),
     ...section(
       `Waive candidates`,
-      pick("waive-candidate").map((t) => `- add \`${t.key}\` to \`waivedFiles\` — ${evidence(t)}`),
+      candidates.filter((t) => !isDirectory(t.key)).map((t) => `- add \`${t.key}\` to \`waivedFiles\` — ${evidence(t)}`),
+    ),
+    ...section(
+      `Not waivable (package keys)`,
+      candidates
+        .filter((t) => isDirectory(t.key))
+        .map((t) => `- \`${t.key}\` — a directory; \`waivedFiles\` takes only single files: ${evidence(t)}`),
     ),
     ...section(
       `Hot spots — evidence against waiving; worth splitting`,
@@ -441,5 +456,9 @@ export async function runOverlapReplay(root: string, tracker: OverlapTracker = g
     tracker,
     branchPrefix: cfg.branchPrefix,
   });
-  return renderOverlapReport(replay, cfg.waivedFiles);
+  return renderOverlapReport(
+    replay,
+    cfg.waivedFiles,
+    (key) => statSync(join(root, key), { throwIfNoEntry: false })?.isDirectory() ?? false,
+  );
 }

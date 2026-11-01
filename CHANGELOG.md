@@ -54,6 +54,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The gateway now hears replies and commands from every chat a bot's projects use, including a separate `question` destination or a second project's chat on a shared bot, instead of silently dropping all but one chat's; it answers a command in the chat it came from. Replies are matched per chat (#660).
 - [ops] A gate now times out after its `timeoutSeconds` (default 3600 s) and reads as a red gate whose report says it timed out, instead of hanging its run and the wave (#531).
 - [ops] The vetinari-paths check reads the brief's declared files with the default resolver, whatever the project's `fileSet`, so a project on `packageScopedFileSet` can declare a `vetinari/` change (#664).
+- [ops] A failed `pending-verify` relabel after a green merge is now retried up to three times, with backoff, before it is logged as `issue-merged-hook-failed` — so one network blip no longer leaves a merged issue on `ready-for-agent` (#604).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).

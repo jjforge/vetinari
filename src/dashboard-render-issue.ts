@@ -2,7 +2,7 @@ import { type CampaignStatus, campaignState, liveWaves, type StatusIssue } from 
 import type { StructuredGraftClosure } from "./graft.ts";
 import type { GraftRejection } from "./plan.ts";
 import { DASHBOARD_PALETTE_CSS } from "./dashboard-assets.ts";
-import { escapeHtml } from "./dashboard-render.ts";
+import { escapeHtml, nonceAttr } from "./dashboard-render.ts";
 
 /**
  * Is this issue still prunable? Only the unfinished remainder is — an unstarted
@@ -73,13 +73,13 @@ const isGraftable = (status: CampaignStatus) => campaignState(liveWaves(status).
  * left edge (that edge is reserved for amber "needs you") — and the confirm button the coral
  * it acts (#328).
  */
-export const renderAggregatedPrunePreview = (project: string, target: string, previewText: string) => `<!doctype html>
+export const renderAggregatedPrunePreview = (project: string, target: string, previewText: string, nonce?: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(project)} — prune #${escapeHtml(target)}</title>
-<style>
+<style${nonceAttr(nonce)}>
 ${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { letter-spacing: -0.035em; }
@@ -122,7 +122,7 @@ const GRAFT_REASON_TEXT: Record<GraftRejection["reason"], string> = {
  * (Appendix A): the card carries the amber 3px left edge every "needs you" card takes (the
  * single edge rule — never the risky-action coral), and each offender's reason reads the rejection red.
  */
-export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure) => {
+export const renderAggregatedGraftRejection = (project: string, closure: StructuredGraftClosure, nonce?: string) => {
   const verdicts = closure.ids
     .map((id) => {
       const rejection = closure.rejected.find((r) => r.id === id);
@@ -136,7 +136,7 @@ export const renderAggregatedGraftRejection = (project: string, closure: Structu
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(project)} — graft rejected</title>
-<style>
+<style${nonceAttr(nonce)}>
 ${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { letter-spacing: -0.035em; }

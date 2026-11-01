@@ -102,6 +102,6 @@ export const handlePrune: RouteHandler = async (req, res, url, deps) => {
     return true;
   }
   res.setHeader("content-type", "text/html; charset=utf-8");
-  res.end(renderAggregatedPrunePreview(project, taskId, previewText));
+  res.end(renderAggregatedPrunePreview(project, taskId, previewText, deps.nonce));
   return true;
 };

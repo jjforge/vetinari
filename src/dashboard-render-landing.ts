@@ -16,6 +16,7 @@ import {
   asRepoOption,
   followView,
   humanizedRow,
+  nonceAttr,
   type RepoOption,
   renderHostLog,
   renderRepoDropdown,
@@ -156,13 +157,13 @@ const scriptSafeJson = (value: unknown): string => JSON.stringify(value).replace
  * dropdown navigates the same way, and "All repos" returns here. Statuses use the
  * ADR 0007 vocabulary. Single-column and touch-friendly on a phone (44px targets).
  */
-export const renderLandingShell = (projects: readonly (string | RepoOption)[]) => `<!doctype html>
+export const renderLandingShell = (projects: readonly (string | RepoOption)[], nonce?: string) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>All repos — Vetinari</title>
-<style>
+<style${nonceAttr(nonce)}>
 ${DASHBOARD_PALETTE_CSS}
   * { box-sizing: border-box; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 1.5rem; background: var(--color-body); color: var(--color-text); }
@@ -260,7 +261,7 @@ ${renderTopBar(renderRepoDropdown(projects, undefined), renderHostLog())}
 <section id="cards" class="cards"><p class="empty">Loading…</p></section>
 <section id="feed" class="live-tail feed" data-feed aria-label="Event log across all repos"><div class="tail-head"><span class="tail-dot" data-feed-dot aria-hidden="true"></span><span class="tail-title tail-title-static">Event log · all repos</span><span class="tail-summary" data-feed-summary></span><span class="tail-gap"></span><span class="tail-controls" data-feed-controls><span class="tail-issue-dd" data-feed-project-dd><button type="button" class="tail-issue-trigger" data-feed-project-trigger aria-haspopup="listbox" aria-expanded="false"><span data-feed-project-label>all repos</span><span class="tail-issue-caret" aria-hidden="true">▾</span></button><ul class="tail-issue-menu" role="listbox" aria-label="Filter by project" data-feed-project-menu hidden></ul></span><input type="text" class="tail-filter" placeholder="filter events…" aria-label="Filter events" data-feed-filter /><button type="button" class="lv-ico lv-pause" data-feed-play data-following="true" aria-label="Pause"></button><button type="button" class="lv-ico" data-feed-save aria-label="Download JSON" title="Download JSON">⤓</button></span></div><div class="feed-body" data-feed-body><p class="empty">Loading…</p></div><button type="button" class="tail-backlog" data-feed-backlog hidden></button><div class="tail-footer" data-feed-footer></div></section>
 ${issueDetailSheetMarkup(true)}
-<script>
+<script${nonceAttr(nonce)}>
   // The state → visual-intent reducers (dashboard-visual-state.ts, ADR 0012), single-
   // sourced into the browser via .toString() so the node test runs the very function
   // this page ships. The __name shim satisfies the keepNames wrapper a bundling build

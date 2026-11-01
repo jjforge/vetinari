@@ -235,10 +235,11 @@ test("serveAllStatus answers a POST body over 64 KiB with a plain 413, not a 500
   }
 });
 
-test("serveAllStatus sends nosniff, no-referrer and one inline-only CSP on HTML, JSON and SSE responses, keeping each content-type", async () => {
+test("serveAllStatus sends nosniff, no-referrer and one nonce-only CSP on HTML, JSON and SSE responses, keeping each content-type (#600)", async () => {
   const configDir = join(tmpdir(), `vetinari-security-headers-${Date.now()}`);
   const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
   const { port } = server.address() as AddressInfo;
+  const nonces: string[] = [];
   try {
     for (const [path, type] of [
       ["/", "text/html; charset=utf-8"],
@@ -259,11 +260,79 @@ test("serveAllStatus sends nosniff, no-referrer and one inline-only CSP on HTML,
         path,
       );
       assert.ok(!sources.some((s) => s === "*" || /^https?:/.test(s)), `${path}: no external source in ${csp}`);
-      // script-src governs scripts, falling back to default-src when it is absent.
-      const scripts = directives.find(([name]) => name === "script-src") ?? directives.find(([name]) => name === "default-src") ?? [];
-      assert.deepEqual(scripts.slice(1), ["'unsafe-inline'"], `${path}: scripts only inline`);
+      assert.ok(!csp.includes("'unsafe-inline'"), `${path}: no 'unsafe-inline' in ${csp}`);
+      // Scripts and styles run only under this response's one nonce, the same for both.
+      const scripts = directives.find(([name]) => name === "script-src") ?? [];
+      const styles = directives.find(([name]) => name === "style-src") ?? [];
+      assert.equal(scripts.length, 2, `${path}: one script source in ${csp}`);
+      assert.match(scripts[1], /^'nonce-[A-Za-z0-9+/]{22,}={0,2}'$/, `${path}: scripts only by nonce`);
+      assert.deepEqual(styles.slice(1), scripts.slice(1), `${path}: styles by the same nonce`);
+      nonces.push(scripts[1]);
       await res.body?.cancel();
     }
+    assert.equal(new Set(nonces).size, nonces.length, `a fresh nonce per response: ${nonces.join(" ")}`);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+// Every `<script>`/`<style>` start tag in a served page must carry that response's CSP nonce,
+// and no element an inline `on…=` handler, which no nonce can admit (#600).
+const assertPageNonced = async (res: Response, label: string) => {
+  const nonce = /script-src 'nonce-([^']+)'/.exec(res.headers.get("content-security-policy") ?? "")?.[1];
+  assert.ok(nonce, `${label}: a CSP nonce`);
+  const html = await res.text();
+  const tags = html.match(/<(script|style)\b[^>]*>/g) ?? [];
+  assert.ok(tags.length, `${label}: has inline blocks`);
+  for (const tag of tags) assert.ok(tag.includes(` nonce="${nonce}"`), `${label}: ${tag} carries the response nonce`);
+  assert.doesNotMatch(html, /\son[a-z]+=/, `${label}: no inline event handler`);
+  return html;
+};
+
+test("serveAllStatus nonces every inline script and style on each page it serves, with no inline handlers (#600)", async () => {
+  const configDir = join(tmpdir(), `vetinari-csp-nonce-${Date.now()}`);
+  const betaDir = join(configDir, "state-beta");
+  // A pruned wave, so the project page also emits its `<noscript><style>` fallback.
+  seedState(betaDir, [
+    event("campaign-start", { ts: "2025-01-01T00:00:00.000Z", waves: [["201"], ["401"]], slots: 1 }),
+    event("prune", { ts: "2025-01-01T00:01:00.000Z", target: "401", removed: ["401"], dropped: [] }),
+  ]);
+  register(configDir, { project: "beta", projectRoot: join(configDir, "beta-root"), baseLocation: betaDir });
+  const rejection = {
+    project: "beta",
+    ids: ["202"],
+    placement: [],
+    remaining: [["201"]],
+    rejected: [{ id: "202", reason: "already-in-campaign" }],
+  };
+  const server = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    prunePreview: () => Promise.resolve("prune #201 → dropping #201"),
+    // Only POST /graft runs a child here; a closure line on a non-zero exit is its 422 page.
+    runChild: () => Promise.resolve({ code: 1, stdout: `graft-closure ${JSON.stringify(rejection)}`, stderr: "", timedOut: false }),
+  });
+  const { port } = server.address() as AddressInfo;
+  const post = (path: string, form: Record<string, string>) =>
+    fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(form).toString(),
+    });
+  try {
+    await assertPageNonced(await fetch(`http://127.0.0.1:${port}/`), "landing");
+    const project = await assertPageNonced(await fetch(`http://127.0.0.1:${port}/?project=beta`), "project page");
+    assert.match(project, /<noscript><style nonce=/, "project page: the no-JS fallback style is present");
+    // The no-JS picker still renders its select and options, only without the dead handler.
+    assert.match(project, /<noscript>[^]*?<select name="project"><option value=""[^>]*>All repos<\/option><option value="beta"/);
+    const prune = await post("/prune", { taskId: "201", project: "beta" });
+    assert.equal(prune.status, 200);
+    await assertPageNonced(prune, "prune preview");
+    const graft = await post("/graft", { ids: "202", project: "beta" });
+    assert.equal(graft.status, 422);
+    await assertPageNonced(graft, "graft rejection");
   } finally {
     server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));

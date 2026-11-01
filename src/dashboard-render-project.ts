@@ -30,7 +30,15 @@ import {
   TOP_BAR_STYLES,
 } from "./dashboard-assets.ts";
 import { dotClass, freezeIntent, graftCarry, reasonWord, redriveAllowed, resumeIntent, stopAllowed } from "./dashboard-visual-state.ts";
-import { escapeHtml, escapeTitle, type RepoOption, renderHostLog, renderRepoDropdown, renderTopBar } from "./dashboard-render.ts";
+import {
+  escapeHtml,
+  escapeTitle,
+  nonceAttr,
+  type RepoOption,
+  renderHostLog,
+  renderRepoDropdown,
+  renderTopBar,
+} from "./dashboard-render.ts";
 import { hasConflict, isPrunable, issueDetailSheetMarkup, renderConflictNote, renderGraftInline } from "./dashboard-render-issue.ts";
 
 const chipTitle = (issue: StatusIssue) => [issue.name, issue.detail].filter(Boolean).join("\n");
@@ -414,6 +422,8 @@ const renderArchivedRuns = (project: string, runs: ArchivedRunView[], openRun?: 
  * project list is given (the empty-registry page renders no picker).
  */
 export interface StatusPageOptions {
+  /** The response's CSP nonce (#600), written on every inline `<script>`/`<style>` the page emits. */
+  nonce?: string;
   projects?: readonly (string | RepoOption)[];
   selected?: string;
   /**
@@ -541,7 +551,7 @@ export const renderStatusPage = (status: CampaignStatus, opts: StatusPageOptions
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(status.project)} status</title>
-<style>
+<style${nonceAttr(opts.nonce)}>
 ${DASHBOARD_PALETTE_CSS}
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: var(--color-body); color: var(--color-text); }
   h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: 0; letter-spacing: -0.035em; color: var(--color-text); }
@@ -729,7 +739,7 @@ ${ISSUE_DETAIL_SHEET_STYLES}
   // keeping the content reachable (the old <details> degraded the same way). Emitted
   // only when there are closed or pruned waves to fall back for.
   status.waves.some((wave) => wave.closed || wave.pruned)
-    ? `\n<noscript><style>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; } .pruned-wave-bar { display: none; } .wave.pruned[hidden] { display: block; }</style></noscript>`
+    ? `\n<noscript><style${nonceAttr(opts.nonce)}>.completed-wave-bar { display: none; } .wave.completed[hidden] { display: block; } .pruned-wave-bar { display: none; } .wave.pruned[hidden] { display: block; }</style></noscript>`
     : ""
 }
 </head>
@@ -783,7 +793,7 @@ ${issueDetailSheetMarkup(Boolean(opts.prune))}${
         .join("")}</section></noscript>`
     : ""
 }
-<script>
+<script${nonceAttr(opts.nonce)}>
   // The presentation-freeze reducer (dashboard-visual-state.ts, ADR 0012), single-sourced
   // into the browser via .toString() so the node test runs the very function this page
   // ships. The __name shim satisfies the keepNames wrapper a bundling build could leave on

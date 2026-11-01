@@ -102,7 +102,7 @@ export const handleGraft: RouteHandler = async (req, res, url, deps) => {
   // whole-batch rejection — so surface the per-id verdicts inline and keep the typed ids.
   const closure = parseGraftClosure(stdout);
   if (closure) {
-    res.writeHead(422, { "content-type": "text/html; charset=utf-8" }).end(renderAggregatedGraftRejection(project, closure));
+    res.writeHead(422, { "content-type": "text/html; charset=utf-8" }).end(renderAggregatedGraftRejection(project, closure, deps.nonce));
     return true;
   }
   // No closure line: the child broke. Surface its own last non-empty stderr line — `graft`

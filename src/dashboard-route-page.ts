@@ -42,7 +42,7 @@ export const handlePage: RouteHandler = async (req, res, url, deps) => {
   // fallback, so a fresh host lands on the (empty) landing rather than a stub page.
   const project = url.searchParams.get("project");
   if (!project || !statuses.length) {
-    res.end(renderLandingShell(repos));
+    res.end(renderLandingShell(repos, deps.nonce));
     return true;
   }
   const selected = selectStatus(statuses, project);
@@ -86,6 +86,7 @@ export const handlePage: RouteHandler = async (req, res, url, deps) => {
       leaseLive,
       baseBranch,
       slowGates,
+      nonce: deps.nonce,
     }),
   );
   return true;

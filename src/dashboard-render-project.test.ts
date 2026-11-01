@@ -1005,7 +1005,8 @@ test("renderStatusPage renders the repo dropdown (with a no-JS select fallback) 
   assert.match(html, /<span class="repo-label">beta<\/span>/);
   // The native <select> lives on inside <noscript> as the no-JS switch (posts back to GET /).
   assert.match(html, /<noscript><form[^>]*method="get"[^>]*action="\/"[^>]*class="project-picker">/);
-  assert.match(html, /<select name="project" onchange="this\.form\.submit\(\)">/);
+  // No inline handler: the CSP admits none, and inside <noscript> one could never run (#600).
+  assert.match(html, /<select name="project">/);
   assert.match(html, /<option value="">All repos<\/option>/);
   assert.match(html, /<option value="beta" selected>beta<\/option>/);
   assert.match(html, /<option value="gamma">gamma<\/option>/);

@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomBytes } from "node:crypto";
 import { isIP, type AddressInfo } from "node:net";
 import type { PruneClosure } from "./dashboard-prune.ts";
 import { shellPruneClosure, shellPrunePreview } from "./dashboard-prune.ts";
@@ -77,12 +78,12 @@ export function dashboardRequestDenial(host: string | undefined, origin: string 
 }
 
 /**
- * The one Content-Security-Policy every dashboard response carries: its pages' inline scripts
- * (including the project picker's `onchange`) and styles, same-origin fetch/EventSource and form
- * posts, and nothing external — nor may any other page frame it.
+ * The one Content-Security-Policy every dashboard response carries: its pages' inline scripts and
+ * styles only under this response's nonce (#600), same-origin fetch/EventSource and form posts, and
+ * nothing external — nor may any other page frame it.
  */
-const DASHBOARD_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
+const dashboardCsp = (nonce: string) =>
+  `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`;
 
 /**
  * The gateway's aggregated status site: one port fronting every registered
@@ -146,7 +147,9 @@ export async function serveAllStatus(
     }
     // Defence in depth on every response (#526): the pages load only their own inline assets and
     // talk only to this origin, so any future escaping slip cannot reach out or be framed.
-    res.setHeader("content-security-policy", DASHBOARD_CSP);
+    // A fresh nonce per response (#600): an injected inline block cannot know it, so cannot run.
+    const nonce = randomBytes(16).toString("base64");
+    res.setHeader("content-security-policy", dashboardCsp(nonce));
     // A framed click carries the dashboard's own Origin and so passes the ADR 0021 Origin check;
     // refusing to be framed (CSP frame-ancestors, and this for older browsers) stops clickjacking (#525).
     res.setHeader("x-frame-options", "DENY");
@@ -171,7 +174,8 @@ export async function serveAllStatus(
         return;
       }
       for (const handle of handlers) {
-        if (await handle(req, res, url, deps)) return;
+        // A per-request copy carries the nonce: `deps` is shared by every request, never mutated.
+        if (await handle(req, res, url, { ...deps, nonce })) return;
       }
       res.writeHead(404).end("not found");
     })().catch((err) => {

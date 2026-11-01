@@ -31,10 +31,11 @@ gates, the paths the merge changed are listed with
 `*/` key with the same basename), by a key the issue resolves to.
 
 - **The issue is read live**, every time a merge touches `vetinari/`: fetched then and
-  resolved the planner's way (the project's `fileSet`, else the default resolver),
-  without `waivedFiles` — those waive planning collisions, not this check. The plan's
-  snapshot is never used, so a human who declares the path and redrives gets it
-  merged. If the issue can't be read, the merge is undone before the error ends the
+  always resolved with the default resolver, whatever the project's `fileSet`: the
+  check is about files, and a package-scoped resolver's keys are directories. It is
+  resolved without `waivedFiles` — those waive planning collisions, not this check.
+  The plan's snapshot is never used, so a human who declares the path and redrives
+  gets it merged. If the issue can't be read, the merge is undone before the error ends the
   campaign, so a redrive checks it again.
 - **Only an explicit marker line declares** — `Touches:`/`Files:`/`Creates:`. With
   none, the issue declares nothing, even where the resolver's whole-body fallback would

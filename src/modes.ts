@@ -1432,16 +1432,18 @@ async function holdCampaignForAnswers(c: CampaignRunContext, members: string[]):
 /**
  * The fileKeys a member's brief declares, for the vetinari-paths check (ADR 0026): its issue fetched
  * now — a human authorizes a `vetinari/` change by editing the issue, so it is never the plan's
- * snapshot — and resolved the planner's way, less nothing (`waivedFiles` waive planning collisions,
- * not this check). Only an explicit marker line declares: with none, the resolver's whole-body
- * fallback would read prose as cites, so the brief declares nothing.
+ * snapshot — and always resolved with the default, file-level resolver, whatever the project's
+ * `fileSet`: the check is about which files the brief names, and a package-scoped resolver's keys are
+ * directories. Less nothing (`waivedFiles` waive planning collisions, not this check). Only an
+ * explicit marker line declares: with none, the resolver's whole-body fallback would read prose as
+ * cites, so the brief declares nothing.
  */
 const declaredKeysFor =
   (cfg: ResolvedConfig) =>
   async (taskId: string): Promise<string[]> => {
     const prose = ticketProse(String(await cfg.fetchTask(taskId)));
     if (!hasFileSetMarker(prose)) return [];
-    return (await (cfg.fileSet ?? defaultFileSet())(prose)).files;
+    return defaultFileSet()(prose).files;
   };
 
 /** What a wave's integration — its first pass plus any merge-conflict retry — left behind. */

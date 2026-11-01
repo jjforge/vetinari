@@ -30,6 +30,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { integrateGreens, VETINARI_PATHS_GATE } from "./merge.ts";
+import { packageScopedFileSet, type FileSetOf } from "./fileset.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
 import { answerParked, clearParked, hasParked, isAnswered, listOutbox, listParked, readParked, writeParkedRecord } from "./state.ts";
 import {
@@ -3296,12 +3297,14 @@ function repoWithVetinariMember(change: (dir: string) => void): string {
 
 /**
  * Run a one-member campaign over `dir` with the real `integrateGreens` (base gate stubbed green).
- * `issue` is the live tracker body; `onRetry` runs when the member is re-admitted. Returns the
- * outcome, every spawn, and the `fetchTask` calls made while integrating.
+ * `issue` is the live tracker body; `onRetry` runs when the member is re-admitted; `fileSet`, when
+ * given, is the campaign's `cfg.fileSet`. Returns the outcome, every spawn, and the `fetchTask`
+ * calls made while integrating.
  */
-async function vetinariPathsCampaign(dir: string, issue: { body: string }, onRetry: () => void = () => {}) {
+async function vetinariPathsCampaign(dir: string, issue: { body: string }, onRetry: () => void = () => {}, fileSet?: FileSetOf) {
   const cfg = harnessCfg(dir);
   cfg.baseBranch = "main";
+  if (fileSet) cfg.fileSet = fileSet;
   let integrating = false;
   const fetchedWhileIntegrating: string[] = [];
   cfg.fetchTask = async (id: string) => {
@@ -3395,6 +3398,68 @@ test("declaring the path on the live issue after a vetinari-paths failure merges
     ["101"],
   );
   assert.equal(listParked(cfg).length, 0);
+});
+
+test("a package-scoped project declares a vetinari/ file on its marker line, and the member merges (#664)", async () => {
+  const dir = repoWithVetinariMember(editsVetinariConfig);
+  const { cfg, outcome, spawns } = await vetinariPathsCampaign(
+    dir,
+    { body: "Touches (existing files): `vetinari/config.mts`" },
+    undefined,
+    packageScopedFileSet(dir),
+  );
+
+  assert.equal(outcome, "done");
+  assert.equal(spawns.length, 1, "never re-admitted");
+  assert.equal(showOnMain(dir, "vetinari/config.mts"), "export default { evil: true };\n");
+  const events = readEventLog(cfg);
+  assert.deepEqual(
+    events.filter((e) => e.event === "re-admit"),
+    [],
+  );
+  assert.deepEqual(
+    events.filter((e) => e.event === "merged").map((e: any) => e.taskId),
+    ["101"],
+  );
+});
+
+/** The campaign failed the vetinari-paths check on `vetinari/config.mts` and kept the change off the base. */
+function assertVetinariPathsFailure(dir: string, cfg: ResolvedConfig, outcome: string) {
+  assert.equal(outcome, "parked");
+  assert.equal(showOnMain(dir, "vetinari/config.mts"), "export default {};\n", "the change never stayed on the base");
+  const events = readEventLog(cfg);
+  assert.deepEqual(
+    events.filter((e) => e.event === "re-admit").map((e: any) => [e.taskId, e.gate, e.paths]),
+    [["101", VETINARI_PATHS_GATE, ["vetinari/config.mts"]]],
+  );
+  assert.deepEqual(
+    events.filter((e) => e.event === "merged"),
+    [],
+  );
+}
+
+test("a package-scoped project whose marker line cites only a src/ file still fails the vetinari-paths check (#664)", async () => {
+  const dir = repoWithVetinariMember(editsVetinariConfig);
+  const { cfg, outcome } = await vetinariPathsCampaign(
+    dir,
+    { body: "Touches (existing files): `src/a.ts`" },
+    undefined,
+    packageScopedFileSet(dir),
+  );
+  assertVetinariPathsFailure(dir, cfg, outcome);
+});
+
+test("the vetinari-paths check never consults the project's own resolver (#664)", async () => {
+  const dir = repoWithVetinariMember(editsVetinariConfig);
+  // A resolver that would declare the vetinari/ file from any ticket, marker cite or not.
+  const declaresEverything: FileSetOf = () => ({ files: ["src/a.ts", "vetinari/config.mts"], confident: true });
+  const { cfg, outcome } = await vetinariPathsCampaign(
+    dir,
+    { body: "Touches (existing files): `src/a.ts`" },
+    undefined,
+    declaresEverything,
+  );
+  assertVetinariPathsFailure(dir, cfg, outcome);
 });
 
 test("a member changing only paths outside vetinari/ never has its issue fetched at integration (#607)", async () => {

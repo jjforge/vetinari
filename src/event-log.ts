@@ -41,6 +41,10 @@ export interface CampaignStartEvent extends BaseEvent {
   /** each waived file (`waivedFiles`) the plan left out of collision checks, with how many
    *  scheduled tickets cited it — absent when nothing was waived (and under `--override`). */
   waived?: Record<string, number>;
+  /** issue id → that scheduled ticket's resolved fileKeys **before** `waivedFiles` is applied
+   *  (post-waive keys are these less `waived`'s files), so a replay reads the keys the planner
+   *  used — absent when the plan resolved no file-sets (a one-issue selection, `--override`). */
+  fileKeys?: Record<string, string[]>;
 }
 
 /** `wave-start` — a wave started: its zero-based index and the tasks it drains (modes.ts). */

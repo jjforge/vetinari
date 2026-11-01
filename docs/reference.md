@@ -196,7 +196,7 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 
 | Event | Fields | Emitted by |
 | --- | --- | --- |
-| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once), `waived?` (waived file → how many scheduled issues cited it; absent when nothing was waived) | campaign |
+| `campaign-start` | `waves`, `slots`, `name?`, `titles?` (id → title, recorded once), `waived?` (waived file → how many scheduled issues cited it; absent when nothing was waived), `fileKeys?` (id → that issue's resolved file keys before the waiver, for replays; absent when the plan resolved no file-sets) | campaign |
 | `wave-start` | `index`, `tasks` | campaign |
 | `spawn` | `taskId` | campaign (queue) |
 | `turn` | `taskId`, `turn`, `summary`, `signal?`, `sessionId?`, `commits?` | run |

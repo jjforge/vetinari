@@ -884,10 +884,12 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   reporter.line(report.report);
   reporter.line("");
   deps.archiveLeftoverRun();
-  // The plan's waived files ride to `campaign-start` (absent when nothing was waived).
+  // The plan's waived files and resolved file keys ride to `campaign-start` (each absent
+  // when the plan has none).
   const outcome = await deps.campaign(cfg, report.waves, host, cmd.name, {
     autoPrune: cmd.autoPrune,
     ...(report.waived && { waived: report.waived }),
+    ...(report.fileKeys && { fileKeys: report.fileKeys }),
   });
   deps.archiveIfIdle();
   deps.setExitCode(exitCodeFor(outcome));

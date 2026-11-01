@@ -1,7 +1,7 @@
 // A happy-dom harness that runs a rendered dashboard page's inline client script in node (ADR
 // 0012's DOM-shim exception): the glue — fetch calls, dialogs, navigation — that no reducer
 // test can reach. The page loads against a stubbed fetch and a no-op EventSource, so it never
-// touches the network.
+// touches the network. A test pushes a live frame into the page through `emit`.
 import type { TestContext } from "node:test";
 import { Window } from "happy-dom";
 
@@ -25,6 +25,10 @@ export interface DashboardDomPage {
   typeInto: (input: HTMLInputElement, text: string) => void;
   /** Let the page's pending promises and microtasks run (a short real timer). */
   settle: (ms?: number) => Promise<void>;
+  /** Push an SSE frame of `type` carrying `JSON.stringify(data)` into the page's most recently
+   * opened EventSource, as the server would: a named event for its listeners, and — for
+   * `"message"`, the unnamed frame — its `onmessage` too. */
+  emit: (type: string, data: unknown) => void;
   /** Close the window — clearing its timers — and reject if any fetch went unhandled. Runs
    * itself after the test (so a failed assertion still clears the page's interval) unless the
    * test already called it. */
@@ -39,11 +43,12 @@ export const dashboardReply = (status: number, body = "", url = "") => {
 };
 
 // happy-dom has no EventSource, and the page's connect() opens one before anything else wires,
-// so without this the whole script aborts. It never fires: no live frame reaches the page.
+// so without this the whole script aborts. It never fires on its own: a frame reaches the page
+// only when the test pushes one through the page's `emit`.
 class SilentEventSource extends EventTarget {
   onopen = null;
   onerror = null;
-  onmessage = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
   readyState = 0;
   close() {}
 }
@@ -79,8 +84,16 @@ export function loadDashboardPage(
     unhandled.push(call);
     return dashboardReply(599, "unhandled by the test's fetch stub");
   };
+  // Every stream the page opens, oldest first, so `emit` can reach the live one.
+  const streams: SilentEventSource[] = [];
+  class RecordedEventSource extends SilentEventSource {
+    constructor() {
+      super();
+      streams.push(this);
+    }
+  }
   // Both stubs go on before the write, so the inline script sees them as it runs.
-  Object.assign(window, { fetch: fetchStub, EventSource: SilentEventSource });
+  Object.assign(window, { fetch: fetchStub, EventSource: RecordedEventSource });
   window.document.write(html);
   let closing: Promise<void> | null = null;
   const close = () =>
@@ -97,6 +110,13 @@ export function loadDashboardPage(
     },
     calls,
     settle: (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms)),
+    emit: (type, data) => {
+      const stream = streams.at(-1);
+      if (!stream) throw new Error("emit: the page opened no EventSource");
+      const event = new MessageEvent(type, { data: JSON.stringify(data) });
+      stream.dispatchEvent(event);
+      if (type === "message") stream.onmessage?.(event);
+    },
     close,
   };
 }

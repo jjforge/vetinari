@@ -334,3 +334,17 @@ test("the review-logs skill documents a config lens that runs overlap.mts with v
   assert.match(skill, /\*\*Config\*\*/);
   assert.ok(skill.includes(`"$(realpath <skill dir>)/../../node_modules/.bin/tsx" "$(realpath <skill dir>)/overlap.mts" <projectRoot>`));
 });
+
+test("a directory key that meets the waive threshold is listed as not waivable, not as a waivedFiles entry to add (#667)", () => {
+  const tally = (key: string) => ({ key, pairs: 6, clean: 6, collides: 0, indeterminate: 0, rate: 0 });
+  const replay = { campaigns: 1, scheduled: 4, landed: 4, keys: [tally("notes.md"), tally("pkg")], staleCiteTickets: [], filteredKeys: {} };
+
+  const out = renderOverlapReport(replay, [], (k) => k === "pkg");
+
+  assert.doesNotMatch(out, /add `pkg` to `waivedFiles`/);
+  assert.match(
+    out,
+    /## Not waivable \(package keys\)\n- `pkg` — a directory; `waivedFiles` takes only single files: 6 pairs: 6 clean, 0 collide, 0 indeterminate; collision rate 0% \(0 of 6 measured\)/,
+  );
+  assert.match(out, /## Waive candidates\n- add `notes\.md` to `waivedFiles` — 6 pairs/);
+});

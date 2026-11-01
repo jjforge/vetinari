@@ -45,7 +45,9 @@ export interface EventLogTailAt {
  * from `at.ino` (replaced: `archiveRun` renames it aside and recreates it, so the
  * moved inode stays alive and can't be reused) or it shrank below `at.offset`
  * (truncated). A partial trailing line — even one cut mid-UTF-8 character — is left
- * unconsumed for the next read. A missing log yields nothing and `{ 0, 0 }`.
+ * unconsumed for the next read. A missing log yields nothing and `{ 0, 0 }`; one that
+ * vanishes between the stat and the read (an `archiveRun` rename landing mid-read)
+ * yields nothing and keeps `at`, so the next call re-stats it and resets on the new inode.
  */
 export function tailEventLog(logFile: string, at: EventLogTailAt): { events: OrchestratorEvent[]; at: EventLogTailAt } {
   let stat;
@@ -59,11 +61,14 @@ export function tailEventLog(logFile: string, at: EventLogTailAt): { events: Orc
   const buf = Buffer.alloc(size - start);
   let read = 0;
   if (buf.length) {
-    const fd = openSync(logFile, "r");
+    let fd: number | undefined;
     try {
+      fd = openSync(logFile, "r");
       for (let n = -1; read < buf.length && n !== 0; read += n) n = readSync(fd, buf, read, buf.length - read, start + read);
+    } catch {
+      return { events: [], at };
     } finally {
-      closeSync(fd);
+      if (fd !== undefined) closeSync(fd);
     }
   }
   const text = buf.subarray(0, read).toString("utf8");

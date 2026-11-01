@@ -6,13 +6,14 @@ import type { CampaignDoneEvent, CampaignStartEvent, WaveDoneEvent, WaveStartEve
 import { describeFragmentNearMisses } from "./changelog.ts";
 import { runGates } from "./gate.ts";
 import { readSlowGateLogs, slowGatesAtSettle } from "./slow-gates.ts";
-import { agentSelectionFor, makeSandbox } from "./sandbox.ts";
+import { agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import {
   branchHasCommits,
   collectWaveChangelog,
   currentBranch,
   integrateGreens,
   parkMergeConflict,
+  purgeBranches,
   type IntegrateResult,
   type MergeConflict,
 } from "./merge.ts";
@@ -260,11 +261,27 @@ export function buildImageCommand(image: string, dockerfile: string, context: st
 }
 
 /**
+ * What `baseline` touches outside itself, injected so its branch handling is testable
+ * without a Docker daemon: `root` is the host repo (`process.cwd()` in production) and
+ * `makeSandbox` creates the baseline's container.
+ */
+export interface BaselineDeps {
+  root: string;
+  makeSandbox: (cfg: ResolvedConfig, taskId: string) => Promise<Sandbox>;
+}
+
+/**
  * Prove the image can run the gates before trusting any agent result: a
  * toolchain probe, then every gate unconditionally. No agent, no cost.
+ *
+ * `agent/baseline` is purged before the sandbox is created and again after it closes
+ * (#681): sandcastle reuses an existing branch and ignores `baseBranch`, so a leftover
+ * one would gate its old tree rather than the base's current tip.
  */
-export async function baseline(cfg: ResolvedConfig) {
-  const sbx = await makeSandbox(cfg, "baseline");
+export async function baseline(cfg: ResolvedConfig, deps: BaselineDeps = { root: process.cwd(), makeSandbox }) {
+  const target = { root: deps.root, branchPrefix: cfg.branchPrefix, stateDir: cfg.stateDir };
+  purgeBranches(target, ["baseline"]);
+  const sbx = await deps.makeSandbox(cfg, "baseline");
   try {
     if (cfg.toolchainProbe) {
       const probe = await sbx.exec(cfg.toolchainProbe);
@@ -280,6 +297,8 @@ export async function baseline(cfg: ResolvedConfig) {
     return green;
   } finally {
     await sbx.close();
+    // purgeBranches also runs `git worktree prune`.
+    purgeBranches(target, ["baseline"]);
   }
 }
 

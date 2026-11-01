@@ -5,6 +5,7 @@ import { writeFileAtomic } from "./atomic-write.ts";
 import { withFileLockSync } from "./file-lock.ts";
 import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
+import { Refusal } from "./refusal.ts";
 
 /**
  * The one park-reason enum (design §2.3), the reason on the parked record, the
@@ -143,6 +144,32 @@ export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageI
 }
 
 /**
+ * The one reader of a single parked record by task id — `readParked`, `isAnswered` and
+ * `answerParked` all read through it. A record that exists but will not parse to an object can
+ * only be a write torn by a power loss or kernel crash (every write is temp-then-rename), so it
+ * throws a `Refusal` naming the file and the recovery rather than a raw `SyntaxError`. A missing
+ * file is not torn: its `ENOENT` propagates untouched, for each caller to handle as it always has.
+ * Nothing is renamed or deleted — the operator decides.
+ */
+function readParkedRecordFile(parkedDir: string, taskId: string): ParkedRecord {
+  const path = parkedRecordPath(parkedDir, taskId);
+  const text = readFileSync(path, "utf8");
+  let rec: unknown;
+  try {
+    rec = JSON.parse(text);
+  } catch {
+    rec = undefined;
+  }
+  if (typeof rec !== "object" || rec === null || Array.isArray(rec)) {
+    throw new Refusal(
+      `parked record ${path} is unreadable — probably a write torn by a crash or power loss. ` +
+        `Delete it, then run \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run) to re-run the task.`,
+    );
+  }
+  return rec as ParkedRecord;
+}
+
+/**
  * The parked record for a task. Resuming a session needs its `sessionId`, so by
  * default a record missing one throws — a resumable park→answer cannot proceed
  * without it. The non-resumable answer path carries no session (it relays via an
@@ -151,7 +178,7 @@ export function setParkedMessageId(parkedDir: string, taskId: string, tgMessageI
  */
 export function readParked(cfg: ResolvedConfig, taskId: string, opts: { requireSession?: boolean } = {}): ParkedRecord {
   const { requireSession = true } = opts;
-  const rec = JSON.parse(readFileSync(file(cfg, taskId), "utf8"));
+  const rec = readParkedRecordFile(cfg.parkedDir, taskId);
   if (requireSession && !rec.sessionId) throw new Error(`parked record for ${taskId} has no sessionId — cannot resume`);
   return rec;
 }
@@ -172,7 +199,7 @@ export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string
   if (!existsSync(cfg.parkedDir)) return false;
   return withParkedLock(cfg.parkedDir, () => {
     if (!existsSync(path)) return false;
-    const rec = JSON.parse(readFileSync(path, "utf8")) as ParkedRecord;
+    const rec = readParkedRecordFile(cfg.parkedDir, taskId);
     writeFileAtomic(path, JSON.stringify({ ...rec, answer, answeredAt: new Date().toISOString() }, null, 2));
     return true;
   });
@@ -185,7 +212,7 @@ export function answerParked(cfg: ResolvedConfig, taskId: string, answer: string
  */
 export function isAnswered(cfg: ResolvedConfig, taskId: string): boolean {
   if (!hasParked(cfg, taskId)) return false;
-  return (JSON.parse(readFileSync(file(cfg, taskId), "utf8")) as ParkedRecord).answer != null;
+  return readParkedRecordFile(cfg.parkedDir, taskId).answer != null;
 }
 
 /**

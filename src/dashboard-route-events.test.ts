@@ -11,7 +11,7 @@ import { register } from "./registry.ts";
 import { logFileOf } from "./dashboard-model.ts";
 import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
-import { handleEvents, MAX_EVENT_CONNECTIONS } from "./dashboard-route-events.ts";
+import { handleApiV1Events, handleEvents, MAX_EVENT_CONNECTIONS } from "./dashboard-route-events.ts";
 import { resSpy } from "./test-support.ts";
 
 let counter = 0;
@@ -78,6 +78,41 @@ test("a connection emits one unnamed frame without waiting for an append (#331)"
   assert.equal(frames.length, 1, "exactly one unnamed frame per connection, regardless of project count");
   assert.match(frames[0], /"project":null/);
   assert.match(frames[0], /"events":\[\]/);
+});
+
+// A GET /api/v1/events connection — the external API's change doorbell (#493) — closed when the test ends.
+const openV1Conn = (t: { after: (fn: () => void) => void }, configDir: string) => {
+  const req = Object.assign(new EventEmitter(), { method: "GET", url: "/api/v1/events", headers: {} });
+  const res = resSpy();
+  t.after(() => req.emit("close"));
+  void handleApiV1Events(req as never, res as never, new URL("http://x/api/v1/events"), depsFor(configDir)); // synchronous
+  return { req, res };
+};
+
+test("/api/v1/events rings {project:null} on connect, then {project} per view-relevant window, with no payload and no named frame (#493)", async (t) => {
+  const { configDir, base } = seed([event("campaign-start", { ts: "2026-08-01T00:00:00.000Z", waves: [["1"]], slots: 1 })]);
+  const { res } = openV1Conn(t, configDir);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(
+    res.chunks.some((c) => c.includes("retry: 3000")),
+    "the reconnect hint goes out on connect",
+  );
+  const handshake = unnamedFrames(res.chunks);
+  assert.deepEqual(handshake, ['data: {"project":null}\n\n'], "exactly one re-fetch-everything frame on connect");
+
+  appendFileSync(
+    logFileOf(base),
+    JSON.stringify({ ts: "2026-08-01T00:01:00.000Z", event: "outbound-enqueued" }) +
+      "\n" +
+      JSON.stringify(event("turn", { taskId: "1", turn: 0, summary: "", ts: "2026-08-01T00:02:00.000Z" })) +
+      "\n",
+  );
+
+  const frame = await waitFor(() => unnamedFrames(res.chunks)[1]);
+  assert.ok(frame, "the view-relevant append rings the project's doorbell");
+  assert.deepStrictEqual(JSON.parse(frame.slice("data:".length)), { project: "gamma" });
+  assert.ok(!res.chunks.some((c) => c.includes("event:")), "no named frame on the v1 stream");
 });
 
 test("a burst of denylisted noise after connect emits no further unnamed frame (#331)", async (t) => {
@@ -169,6 +204,17 @@ test("a 17th concurrent live-update connection is refused with 503", (t) => {
   const { configDir } = seed([]);
   for (let i = 0; i < 16; i++) assert.equal(openConn(t, configDir).res.statusCode, 200);
 
+  assertRefused(openConn(t, configDir).res);
+});
+
+test("/api/events and /api/v1/events share one connection cap: the 17th across both is refused with 503 (#493)", (t) => {
+  const { configDir } = seed([]);
+  for (let i = 0; i < 8; i++) {
+    assert.equal(openConn(t, configDir).res.statusCode, 200);
+    assert.equal(openV1Conn(t, configDir).res.statusCode, 200);
+  }
+
+  assertRefused(openV1Conn(t, configDir).res);
   assertRefused(openConn(t, configDir).res);
 });
 

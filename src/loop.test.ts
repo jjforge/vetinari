@@ -2094,3 +2094,34 @@ test("an `outdated-agent` record with no session runs fresh and is cleared (#444
   assert.equal(sbx.runCalls[0].resumeSession, undefined);
   assert.equal(hasParked(cfg, "T-1"), false);
 });
+
+test("a harvested finding is scrubbed of the project's .env and host.env values before triage, logging counts but never the secret", async () => {
+  const rep = capturingReporter();
+  const cfg = harnessCfg({ reportFinding: rep.reportFinding });
+  const provider = "fake-oauth-token-0123456789abcdef";
+  const telegram = "123456789:fake-telegram-bot-token";
+  writeFileSync(join(cfg.stateDir, ".env"), `CLAUDE_CODE_OAUTH_TOKEN=${provider}\nEMPTY=\n`);
+  writeFileSync(join(cfg.stateDir, "host.env"), `export VETINARI_TELEGRAM_BOT_TOKEN="${telegram}" # the bot\n`);
+  const harvest = `<finding><summary>token ${provider} printed</summary><location>logs</location><repro>grep ${telegram}; grep ${provider}</repro></finding><promise>COMPLETE</promise>`;
+
+  await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(greenThen(harvest))));
+
+  assert.equal(rep.calls.length, 1);
+  assert.equal(rep.calls[0].finding.summary, "token [redacted CLAUDE_CODE_OAUTH_TOKEN] printed");
+  assert.equal(rep.calls[0].finding.repro, "grep [redacted VETINARI_TELEGRAM_BOT_TOKEN]; grep [redacted CLAUDE_CODE_OAUTH_TOKEN]");
+  const rows = readEventLog(cfg).filter((e) => (e as { event: string }).event === "finding-redacted");
+  assert.deepEqual(
+    rows.map(({ event, taskId, summary, redactions }: any) => ({ event, taskId, summary, redactions })),
+    [
+      {
+        event: "finding-redacted",
+        taskId: "T-1",
+        summary: "token [redacted CLAUDE_CODE_OAUTH_TOKEN] printed",
+        redactions: { CLAUDE_CODE_OAUTH_TOKEN: 2, VETINARI_TELEGRAM_BOT_TOKEN: 1 },
+      },
+    ],
+  );
+  for (const row of readEventLog(cfg)) {
+    assert.doesNotMatch(JSON.stringify(row), new RegExp(`${provider}|${telegram}`), "no log row carries a secret");
+  }
+});

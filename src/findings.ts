@@ -274,3 +274,49 @@ export async function triageFindings(findings: Finding[], ctx: FindingContext, p
   }
   return out;
 }
+
+/** A known secret value shorter than this is not redacted — too likely to be an ordinary word. */
+const MIN_SECRET_LENGTH = 8;
+
+/**
+ * The token shapes a finding is scrubbed of, in order — `anthropic-key` before the broader
+ * `openai-key`, so an Anthropic key counts as one. Every token pattern opens on a word boundary —
+ * unanchored, `sk-…` would bite into a kebab-case path like `src/task-management-and-scheduling.ts` —
+ * and a private key is redacted as its whole `BEGIN … END` block.
+ */
+export const SECRET_TOKEN_SHAPES: readonly { kind: string; pattern: RegExp }[] = [
+  { kind: "anthropic-key", pattern: /\bsk-ant-[A-Za-z0-9_-]{20,}/ },
+  { kind: "openai-key", pattern: /\bsk-[A-Za-z0-9_-]{20,}/ },
+  { kind: "github-token", pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/ },
+  { kind: "slack-token", pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/ },
+  { kind: "aws-key", pattern: /\bAKIA[0-9A-Z]{16}/ },
+  { kind: "private-key", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/ },
+];
+
+/**
+ * Redact secrets from every text field of a finding before it is triaged or filed — a filed
+ * finding is a public issue no human reviews first. Each known secret's exact value becomes
+ * `[redacted <NAME>]` (longest first, so a value containing another is redacted whole; values
+ * under `MIN_SECRET_LENGTH` skipped); then each `SECRET_TOKEN_SHAPES` match becomes
+ * `[redacted: <kind>]`. Returns the scrubbed finding and how many redactions each env key or
+ * kind made — never the matched text.
+ */
+export function scrubFinding(
+  finding: Finding,
+  knownSecrets: { name: string; value: string }[],
+): { finding: Finding; redactions: Record<string, number> } {
+  const redactions: Record<string, number> = {};
+  const replace = (text: string, match: string | RegExp, key: string, marker: string): string => {
+    const parts = text.split(match);
+    if (parts.length > 1) redactions[key] = (redactions[key] ?? 0) + parts.length - 1;
+    return parts.join(marker);
+  };
+  const secrets = knownSecrets.filter((s) => s.value.length >= MIN_SECRET_LENGTH).sort((a, b) => b.value.length - a.value.length);
+  const scrub = (text: string): string => {
+    for (const { name, value } of secrets) text = replace(text, value, name, `[redacted ${name}]`);
+    for (const { kind, pattern } of SECRET_TOKEN_SHAPES) text = replace(text, pattern, kind, `[redacted: ${kind}]`);
+    return text;
+  };
+  const scrubbed = Object.fromEntries(Object.entries(finding).map(([k, v]) => [k, typeof v === "string" ? scrub(v) : v])) as Finding;
+  return { finding: scrubbed, redactions };
+}

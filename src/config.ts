@@ -402,7 +402,7 @@ export function refuseVetinariSecretsInEnv(envPath: string): void {
  * not mirrored — it never changes a key or whether a value is empty). Keys keep file order.
  * No shell semantics.
  */
-function readEnvLikeSandcastle(text: string): Record<string, string> {
+export function readEnvLikeSandcastle(text: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const raw of text.split("\n")) {
     const line = raw.trim();

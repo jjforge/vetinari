@@ -325,7 +325,7 @@ export function credentialsExposureWarning(baseLocations: string[]): string | un
  * comments) into a plain record. Not a full shell — just enough to read the
  * simple assignments a `host.env` carries.
  */
-function parseEnvFile(text: string): Record<string, string> {
+export function parseEnvFile(text: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const raw of text.split("\n")) {
     const line = raw.trim();

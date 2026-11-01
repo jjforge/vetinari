@@ -404,3 +404,19 @@ parked — nothing to answer", "the live campaign will pick up the work; redrive
 A no-op reports on **stdout** and exits **0** (design §7's idempotent answer); it is not
 a [[refusal]], even when its wording contains the word "refused".
 _Avoid_: refusal, failure.
+
+### Verification
+
+**Proving ground**:
+A small separate [[project]], with its own repo and tracker, that exists only to run
+scenario [[issue]]s through vetinari's real stack: the sandbox, the agent image, the
+real agent CLI and model, the tracker and the [[gateway]].
+_Avoid_: test repo, sandbox repo, demo (that is the dashboard fixture).
+
+**Boundary check**:
+One [[campaign]] of the [[proving-ground]]'s scenarios, checked against each scenario's
+expected outcome. It verifies only what the in-process scenario tests can't: the
+container, agent and tracker boundary. It is run when that boundary changes (a
+sandcastle sync, the agent image, vetinari's agent, sandbox or tracker wiring), not
+for every change.
+_Avoid_: smoke test, canary, e2e test (that is the in-process scenario suite).

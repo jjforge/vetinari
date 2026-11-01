@@ -51,9 +51,9 @@ import {
   readLeases,
   registerProject,
   releaseSlot,
-  type HostBudget,
+  type HostCeiling,
   type SlotLease,
-} from "./host-slots.ts";
+} from "./lease.ts";
 import { defaultPruneDeps, runPrune } from "./prune.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import { withEnv } from "./test-support.ts";
@@ -283,7 +283,7 @@ test("no notice builder renders a retired word — the settled vocabulary reache
 test("a green campaign's outbound notices carry no retired word (§10, §13.1)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-notice-vocab-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // A two-wave green campaign emits campaign-start, wave-start ×2, wave-done ×2, campaign-done —
   // every inline campaign notice — so grepping the outbox proves the whole set uses the skeleton.
   await silenceConsole(() =>
@@ -559,7 +559,7 @@ test("a wave declares its want as held-plus-pending and refreshes it as the wave
   const cfg = harnessCfg(dir);
   // Ceiling 2 with a three-ticket wave: one ticket stays pending while two run, so
   // the want must move as containers finish rather than sit frozen at the wave size.
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 2, weight: 1 };
   const seen: Record<string, number | undefined> = {};
   // Capture the project's declared want on its lease at the moment each child starts.
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
@@ -578,7 +578,7 @@ test("a wave declares its want as held-plus-pending and refreshes it as the wave
 test("a one-ticket wave declares it wants exactly one slot — the reservation bug (#387)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-want-one-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 8, weight: 2 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 8, weight: 2 };
   let seen: number | undefined;
   const childRun: CampaignDeps["spawnRun"] = async () => {
     seen = readLeases(host.configDir).find((l) => l.project === cfg.project)?.want;
@@ -592,7 +592,7 @@ test("a one-ticket wave declares it wants exactly one slot — the reservation b
 test("the campaign lease spans the whole campaign — it is live during integration, at held 0 / want 0 between waves (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-life-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Record what the campaign-liveness guard and this process's own lease look like at each
   // integration — the between-waves window the lease used to fall out of (#424).
@@ -623,7 +623,7 @@ test("the campaign lease spans the whole campaign — it is live during integrat
 
 // After a campaign leaves — however it left — the whole-life lease is gone: the guard reads
 // not-live and no lease file remains for this process (#424).
-const assertLeaseDropped = (host: HostBudget, cfg: ResolvedConfig) => {
+const assertLeaseDropped = (host: HostCeiling, cfg: ResolvedConfig) => {
   assert.equal(projectHasLiveCampaign(host.configDir, cfg.project), false, "no live campaign after the campaign leaves");
   assert.equal(
     readLeases(host.configDir).some((l) => l.pid === process.pid),
@@ -635,7 +635,7 @@ const assertLeaseDropped = (host: HostBudget, cfg: ResolvedConfig) => {
 test("a done campaign drops its whole-life lease on the way out (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-done-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const ok = await silenceConsole(() =>
     campaign(
       cfg,
@@ -653,7 +653,7 @@ test("a done campaign drops its whole-life lease on the way out (#424)", async (
 test("a parked campaign drops its whole-life lease on the way out (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-parked-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // 102 parks (its child `run` exits 2) and holds the wave — the campaign returns parked.
   const childRun: CampaignDeps["spawnRun"] = async (taskId) => (taskId === "102" ? 2 : 0);
   const ok = await silenceConsole(() => campaign(cfg, [["101", "102"]], host, "parked", {}, gitFreeDeps(cfg, childRun)));
@@ -664,7 +664,7 @@ test("a parked campaign drops its whole-life lease on the way out (#424)", async
 test("a campaign whose integration throws still drops its whole-life lease (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-throw-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async () => 0),
     integrate: async () => {
@@ -678,7 +678,7 @@ test("a campaign whose integration throws still drops its whole-life lease (#424
 test("a redrive with nothing left to run returns done and leaves no lease behind (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-nothing-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // A paused campaign whose only wave already closed: a resume finds nothing to run.
   cfg.log.log("campaign-start", { waves: [["101"]], slots: 4 });
   cfg.log.log("green", { taskId: "101", branch: "agent/101", commits: ["abc"] });
@@ -701,7 +701,7 @@ test("a redrive with nothing left to run returns done and leaves no lease behind
 test("campaign prints human-readable plan/wave/complete lines and NO event JSON to stdout by default (#299)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
     captureLines(() =>
       campaign(
@@ -732,7 +732,7 @@ test("campaign prints human-readable plan/wave/complete lines and NO event JSON 
 test("campaign prints the changelog near-miss line through the reporter even when the wave collected nothing (#357)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-nearmiss-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async () => 0),
     collectChangelog: () => ({
@@ -767,7 +767,7 @@ const slowLines = (lines: string[]) => lines.filter((l) => l.includes("slow gate
 test("a wave-done is followed by its slow-gate lines: a budget overrun at each wave that had one, a history flag once (#445)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedGateArchive(cfg, 60, 60, 60, 60, 60);
   const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
     for (const s of [200, 200, 400]) logGateResult(cfg, taskId, s, { budgetSeconds: 300 });
@@ -798,7 +798,7 @@ test("a wave that fails or parks prints its slow-gate lines beside the stop, not
   ] as const) {
     const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-stop-"));
     const cfg = harnessCfg(dir);
-    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
     const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
       // The gate hit its runner's timeout: red, and over budget.
       logGateResult(cfg, taskId, 601, { exitCode: 2, budgetSeconds: 300 });
@@ -821,7 +821,7 @@ test("a wave that fails or parks prints its slow-gate lines beside the stop, not
 test("a redrive of a campaign does not reprint a history flag an earlier settle already printed (#445)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-slow-gates-redrive-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedGateArchive(cfg, 60, 60, 60, 60, 60);
   // First run: wave 1's member is slow and parks, so the flag prints beside the park.
   const parking: CampaignDeps["spawnRun"] = async (taskId) => {
@@ -869,7 +869,7 @@ const costLines = (lines: string[]) => lines.filter((l) => /^wave \d+\/\d+: .* �
 test("each wave-done prints the wave's time split, and the campaign's end its merged-base gate total (#615)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52, 20) };
   const lines = await withEnv({ VETINARI_JSON: undefined }, () =>
     captureLines(() => campaign(cfg, [["101"], ["201"]], host, "cost", {}, deps)),
@@ -891,7 +891,7 @@ test("a campaign that fails or parks prints its merged-base gate total beside th
   ] as const) {
     const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-stop-"));
     const cfg = harnessCfg(dir);
-    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
     // Wave 1 merges and gates its base; wave 2's member fails or parks.
     const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
       if (taskId === "101") return greenAfterGate(cfg)(taskId);
@@ -914,7 +914,7 @@ test("a campaign that fails or parks prints its merged-base gate total beside th
 test("under --json the wave splits and the merged-base gate total are silent (#615)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-wave-cost-json-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const deps = { ...gitFreeDeps(cfg, greenAfterGate(cfg)), integrate: integrateLoggingBaseGate(cfg, 52) };
   const lines = await withEnv({ VETINARI_JSON: "1" }, () => captureLines(() => campaign(cfg, [["101"]], host, "cost", {}, deps)));
   assert.deepEqual(costLines(lines), []);
@@ -923,7 +923,7 @@ test("under --json the wave splits and the merged-base gate total are silent (#6
 test("campaign under --json streams the raw event stream and suppresses the human lines (#299)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-report-json-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const lines = await withEnv({ VETINARI_JSON: "1" }, () =>
     captureLines(() =>
       campaign(
@@ -956,7 +956,7 @@ test("campaign under --json streams the raw event stream and suppresses the huma
 test("campaign drives every wave with no Docker — the per-wave re-derive survives a faithful child spawn (#151/#150)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // A faithful stand-in for a spawned child `run`: at startup it consults the real
   // leftover-archive gate honoring the child marker (isChild:true), exactly as
@@ -973,14 +973,14 @@ test("campaign drives every wave with no Docker — the per-wave re-derive survi
 
   assert.equal(ok, "done");
   const events = readEventLog(cfg);
-  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
+  const waveStarts = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   // Every wave in the plan re-derived and ran, in order — the log was never stranded.
   assert.deepEqual(
-    batches.map((b) => b.index),
+    waveStarts.map((b) => b.index),
     [0, 1, 2],
   );
   assert.deepEqual(
-    batches.map((b) => b.tasks),
+    waveStarts.map((b) => b.tasks),
     [["101"], ["102"], ["103"]],
   );
   assert.ok(events.some((e) => e.event === "campaign-done"));
@@ -989,7 +989,7 @@ test("campaign drives every wave with no Docker — the per-wave re-derive survi
 test("the harness has teeth — a child that archives the parent log (the #150 bug) strands the plan after wave 0", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // The pre-#150 child: it archives the parent's live log (isChild:false through the
   // same gate), exactly the bug #150 fixed. The archive wipes the campaign's in-flight
@@ -1003,8 +1003,8 @@ test("the harness has teeth — a child that archives the parent log (the #150 b
 
   // With the plan stranded, waves 1 and 2 never start — proof the harness would go
   // red against pre-#150 code, so the faithful-child test above genuinely pins it.
-  const batches = readEventLog(cfg).filter((e) => e.event === "wave-start");
-  assert.ok(batches.length < 3, `expected the archive to strand the plan, but ${batches.length} waves ran`);
+  const waveStarts = readEventLog(cfg).filter((e) => e.event === "wave-start");
+  assert.ok(waveStarts.length < 3, `expected the archive to strand the plan, but ${waveStarts.length} waves ran`);
 });
 
 test("campaign stamps its name and titles once on campaign-start, names the completion, and names the operator notes (#174)", async () => {
@@ -1012,7 +1012,7 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
   const cfg = harnessCfg(dir);
   const titles: Record<string, string> = { "101": "cache eviction", "102": "warm the cache" };
   cfg.fetchTask = async (id) => JSON.stringify({ title: titles[String(id).replace(/^#/, "")] ?? "" });
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   const ok = await silenceConsole(() =>
     campaign(
@@ -1043,7 +1043,7 @@ test("campaign stamps its name and titles once on campaign-start, names the comp
 
 test("campaign records the plan's waived files on campaign-start, and omits the field when none were waived", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-waived-"));
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const startOf = async (cfg: ReturnType<typeof harnessCfg>, opts: { waived?: Record<string, number> }) => {
     await silenceConsole(() =>
       campaign(
@@ -1067,7 +1067,7 @@ test("campaign records the plan's waived files on campaign-start, and omits the 
 
 test("campaign records each scheduled ticket's file keys on campaign-start, and omits the field without them (#658)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-filekeys-"));
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const startOf = async (cfg: ReturnType<typeof harnessCfg>, opts: { fileKeys?: Record<string, string[]> }) => {
     await silenceConsole(() =>
       campaign(
@@ -1093,7 +1093,7 @@ test("campaign writes no festive-name offset on campaign-start — the name is d
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-festive-"));
   const cfg = harnessCfg(dir);
   // One shared host cursor across both campaigns (same configDir) — nothing should consume it.
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   await silenceConsole(() =>
     campaign(
@@ -1130,7 +1130,7 @@ test("campaign writes no festive-name offset on campaign-start — the name is d
 test("campaign --resume recovers the run's name from the log, not the ignored param (#174)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-resume-named-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Seed a paused campaign: wave 0 (101) already banked green, wave 1 (102) still to run.
   cfg.log.log("campaign-start", {
@@ -1208,7 +1208,7 @@ const seedParkedWave = (cfg: ResolvedConfig, reason: "question" | undefined) => 
 test("redrive re-enters the parked wave and integrates a green-but-unmerged member without respawning it (design §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-green-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   // The answer landed: 102 ran to green (its record cleared, a `green` logged) — so both
   // members are `completed`, but the wave still never closed.
@@ -1234,7 +1234,7 @@ test("redrive re-enters the parked wave and integrates a green-but-unmerged memb
 test("the redrive event carries fromWave, landed, and skipped (design §2.1, §7, #314)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-counts-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] }); // both completed
 
@@ -1296,7 +1296,7 @@ test("a green re-gate of a red-base wave fires onIssueMerged for every member al
   const dir = mkdtempSync(join(tmpdir(), "vetinari-regate-green-"));
   const seen: string[] = [];
   const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedRedBaseParkedWave(cfg);
 
   const regates: (boolean | undefined)[] = [];
@@ -1311,7 +1311,7 @@ test("a re-gate of a red-base wave that is still red fires onIssueMerged for no 
   const dir = mkdtempSync(join(tmpdir(), "vetinari-regate-red-"));
   const seen: string[] = [];
   const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedRedBaseParkedWave(cfg);
 
   const regates: (boolean | undefined)[] = [];
@@ -1330,7 +1330,7 @@ test("a redrive of a non-red-base park relabels only the freshly merged members,
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-question-hook-"));
   const seen: string[] = [];
   const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] }); // the answer landed
 
@@ -1357,7 +1357,7 @@ test("a redrive after a crash between a wave's merges and its base gate re-gates
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-ungated-"));
   const seen: string[] = [];
   const cfg = { ...harnessCfg(dir), onIssueMerged: (id: string) => void seen.push(id) };
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedCrashBeforeBaseGate(cfg);
 
   const regates: (boolean | undefined)[] = [];
@@ -1372,7 +1372,7 @@ test("a redrive after a crash between a wave's merges and its base gate re-gates
 test("a redrive of a question park prints no re-gate line (design §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-question-noregate-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
 
@@ -1387,7 +1387,7 @@ test("a redrive of a question park prints no re-gate line (design §7)", async (
 test("a redrive of a legacy wave park — a campaign-parked with no reason — re-gates the wave", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-legacy-park-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, undefined); // a log written before `campaign-parked` carried a reason
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
 
@@ -1402,7 +1402,7 @@ test("a redrive of a legacy wave park — a campaign-parked with no reason — r
 test("resolve reads only the wave's members — a stray parked record for a non-member never holds the wave (design §5 step 5, #314)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-nonmember-park-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // A parked record on disk for #999 — an issue NOT in this campaign (a prune removed it, or
   // another process left it). Every member of the wave goes green.
   seedParkedRecord(cfg, "999");
@@ -1432,7 +1432,7 @@ test("resolve reads only the wave's members — a stray parked record for a non-
 test("redrive re-runs a parked member whose parked record is gone (a crash, no record), and lands the rest", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-norecord-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   // 102 is parked in the log but has NO on-disk record — a crash-shaped member, re-run on its branch.
 
@@ -1451,7 +1451,7 @@ test("redrive re-runs a parked member whose parked record is gone (a crash, no r
 test("redrive refuses a torn parked record before spawning anything, naming the record (#574)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-torn-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   // 102's record survived a power loss as zero bytes — a torn write, not a missing record.
   mkdirSync(cfg.parkedDir, { recursive: true });
@@ -1572,7 +1572,7 @@ const resumeCapturingDeps = (
 test("redrive resumes a crashed member's session when the provider is resumable and the branch has commits (design §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-resume-"));
   const cfg = harnessCfg(dir); // no agent → claude, resumable
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
@@ -1596,7 +1596,7 @@ test("redrive resumes a crashed member's session when the provider is resumable 
 test("redrive runs a crashed member fresh when its branch has no commits (design §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-nocommits-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
@@ -1621,7 +1621,7 @@ test("redrive runs a crashed member fresh when the provider is non-resumable, ev
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-nonresumable-"));
   const cfg = harnessCfg(dir);
   (cfg as { agent?: unknown }).agent = { provider: "cursor" }; // non-resumable
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedCrashWithSession(cfg);
 
   const spawns: { id: string; resume?: string }[] = [];
@@ -1645,7 +1645,7 @@ test("redrive runs a crashed member fresh when the provider is non-resumable, ev
 test("redrive re-runs a parked member whose record is ANSWERED, consuming the answer, and lands the rest (design §5 step 3, §7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-answered-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   // 102's parked record is on disk WITH a delivered answer — the re-admit signal. Its record
   // is present but answered, so it re-runs (a plain un-answered record would hold the wave).
@@ -1674,7 +1674,7 @@ test("redrive re-runs a parked member whose record is ANSWERED, consuming the an
 test("redrive does not spawn a parked member whose record remains; the wave parks again", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-unanswered-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   seedParkedWave(cfg, "question");
   // 102's parked record is still on disk — no answer landed.
   mkdirSync(cfg.parkedDir, { recursive: true });
@@ -1700,7 +1700,7 @@ test("redrive does not spawn a parked member whose record remains; the wave park
 test("redrive resumes at the parked wave, not past it — a closed earlier wave is skipped", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-index-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // Wave 0 closed (wave-done), wave 1 parked (102 parked, record present), wave 2 unrun.
   cfg.log.log("campaign-start", { waves: [["101"], ["102"], ["103"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
@@ -1726,17 +1726,17 @@ test("redrive resumes at the parked wave, not past it — a closed earlier wave 
   assert.deepEqual(spawned, [], "neither the closed wave 0 nor the still-parked wave 1 respawned");
   assert.deepEqual(regates, [false], "a question park is not re-gated");
   // The redrive re-entered wave 1 (its wave-start re-logged), never stepping to wave 2.
-  const batches = readEventLog(cfg)
+  const waveStarts = readEventLog(cfg)
     .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.index);
-  assert.ok(batches.includes(1), "the redrive re-entered the parked wave 1");
-  assert.ok(!batches.includes(2), "the redrive never started wave 2 past the unresolved park");
+  assert.ok(waveStarts.includes(1), "the redrive re-entered the parked wave 1");
+  assert.ok(!waveStarts.includes(2), "the redrive never started wave 2 past the unresolved park");
 });
 
 test("redrive stops as failed again on a failed member, but re-runs it under --override", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-failed-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const seedFailedWave = () => {
     cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
     cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
@@ -1768,7 +1768,7 @@ test("redrive --override re-runs a failed member that holds an answered record, 
   // refuse it): the override re-runs it, and the child's run loop consumes the answered record.
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-failed-answered-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   cfg.log.log("campaign-start", { waves: [["102"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["102"] });
   cfg.log.log("parked", { taskId: "102", reason: "question" });
@@ -1795,7 +1795,7 @@ test("redrive --override re-runs a failed member that holds an answered record, 
 test("a graft appended mid-wave lands in a future wave; the loop re-derives and runs it (#166)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-graft-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   const spawned: string[] = [];
   // While wave 0 (task 101) runs, graft 301 onto the campaign. The wave-loop
@@ -1812,19 +1812,19 @@ test("a graft appended mid-wave lands in a future wave; the loop re-derives and 
   const ok = await silenceConsole(() => campaign(cfg, [["101"], ["201"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.equal(ok, "done");
-  const batches = readEventLog(cfg)
+  const waveStarts = readEventLog(cfg)
     .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.tasks);
   // Wave 0 ran 101 alone (untouched by the graft); 301 landed in a later wave and ran.
-  assert.deepEqual(batches[0], ["101"]);
-  assert.ok(batches.slice(1).flat().includes("301"), "grafted 301 ran in a later wave");
+  assert.deepEqual(waveStarts[0], ["101"]);
+  assert.ok(waveStarts.slice(1).flat().includes("301"), "grafted 301 ran in a later wave");
   assert.ok(spawned.includes("301"), "the loop actually spawned the grafted issue");
 });
 
 test("a replan appended mid-wave rewrites the unstarted waves; the loop runs the new plan at the next boundary (#614)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-replan-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // While wave 0 (101) runs, a re-plan puts 201 and 202 — two waves at launch — side by side.
   const childRun: CampaignDeps["spawnRun"] = async (taskId) => {
@@ -1835,16 +1835,16 @@ test("a replan appended mid-wave rewrites the unstarted waves; the loop runs the
   const ok = await silenceConsole(() => campaign(cfg, [["101"], ["201"], ["202"]], host, "harness", {}, gitFreeDeps(cfg, childRun)));
 
   assert.equal(ok, "done");
-  const batches = readEventLog(cfg)
+  const waveStarts = readEventLog(cfg)
     .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.tasks);
-  assert.deepEqual(batches, [["101"], ["201", "202"]]);
+  assert.deepEqual(waveStarts, [["101"], ["201", "202"]]);
 });
 
 test("a replan logged on a stopped campaign is what the next redrive runs (#614)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-replan-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   cfg.log.log("campaign-start", { waves: [["101"], ["201"], ["202"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101"] });
   cfg.log.log("wave-done", { index: 0, merged: ["101"] });
@@ -1865,17 +1865,17 @@ test("a replan logged on a stopped campaign is what the next redrive runs (#614)
   );
 
   assert.equal(ok, "done");
-  const batches = readEventLog(cfg)
+  const waveStarts = readEventLog(cfg)
     .filter((e): e is WaveStartEvent => e.event === "wave-start")
     .map((b) => b.tasks);
-  assert.deepEqual(batches.slice(1), [["202", "201"]]);
+  assert.deepEqual(waveStarts.slice(1), [["202", "201"]]);
   assert.deepEqual(spawned.sort(), ["201", "202"]);
 });
 
 test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, then wave-parks — no next wave starts", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Wave 0: 101 goes green, 102 parks (exit 2 → outcome "parked"). The wave drains —
   // 101 still merges under Gate 2 — and then escalates to a wave-park.
@@ -1892,9 +1892,9 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
   assert.ok(!spawned.includes("201"), "the succeeding wave's issue never spawned");
 
   const events = readEventLog(cfg);
-  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
+  const waveStarts = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   assert.deepEqual(
-    batches.map((b) => b.index),
+    waveStarts.map((b) => b.index),
     [0],
     "only wave 0 ran — no succeeding wave started",
   );
@@ -1920,7 +1920,7 @@ test("Gate 1 (ADR 0017): a per-issue park drains its wave, merges the greens, th
 test("Gate 1: a parked record survives the wave boundary — the boundary clears nothing (design §2.5)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-park-rec-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Seed the parked record a parking child would have written — the stubbed spawnRun
   // only returns the exit code, so we place the record the wave boundary must leave alone.
@@ -1939,7 +1939,7 @@ test("re-admit: a parked member answered while the wave still drains re-runs and
   const dir = mkdtempSync(join(tmpdir(), "vetinari-readmit-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 0; // re-admit during the drain is independent of the boundary grace window
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // 101 drains slowly (its slot stays leased until we resolve it); 102 parks first —
   // writing its on-disk record like a real child — then, while 101 is still in flight,
@@ -1995,7 +1995,7 @@ test("grace window: a question/stalled park no answer resolves within parkGraceS
   const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-expiry-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // 101 green, 102 parks and its record stays in place — no answer lands within the window.
   const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
@@ -2031,7 +2031,7 @@ test("grace window: an answer that lands within parkGraceSeconds re-admits the m
   const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-answered-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   let parked102 = true;
   const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
@@ -2063,7 +2063,7 @@ test("grace window: a conflict (quarantine) never triggers the wait, even with p
   const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-conflict-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Both green; integration then quarantines 102 on a merge conflict — a conflict park, not a
   // question/stalled member park. No member is `parked`, so the grace window is never entered.
@@ -2097,7 +2097,7 @@ test("grace window: the default parkGraceSeconds of 0 never waits — a park sto
   const dir = mkdtempSync(join(tmpdir(), "vetinari-grace-default-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 0;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
     if (taskId === "102") {
@@ -2124,7 +2124,7 @@ test("grace window: the default parkGraceSeconds of 0 never waits — a park sto
 test("Gate 2 unchanged: an all-green wave whose combined base gates red still wave-parks via the existing path — Gate 1 does not double-fire", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-gate2-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Every issue passes alone (all green), but the merged base gates red with no
   // attributable culprit — the Gate 2 wave-park. `integrateGreens` owns logging the
@@ -2162,7 +2162,7 @@ test("Gate 2 unchanged: an all-green wave whose combined base gates red still wa
 test("a failed member drains its wave, integrates the greens, then stops the campaign as failed — no next wave (#285)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-campaign-fail-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Wave 0: 101 goes green, 102 fails (child `run` exits 1 → outcome "error(1)"). The wave
   // still drains and 101 still merges under integration; then the failure holds the wave
@@ -2179,9 +2179,9 @@ test("a failed member drains its wave, integrates the greens, then stops the cam
   assert.ok(!spawned.includes("201"), "the succeeding wave never starts once a member failed");
 
   const events = readEventLog(cfg);
-  const batches = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
+  const waveStarts = events.filter((e): e is WaveStartEvent => e.event === "wave-start");
   assert.deepEqual(
-    batches.map((b) => b.index),
+    waveStarts.map((b) => b.index),
     [0],
     "only wave 0 ran — no succeeding wave started",
   );
@@ -2214,7 +2214,7 @@ test("a quarantine that strands later-wave dependents wave-parks the campaign �
   const cfg = harnessCfg(dir);
   // 701 in the later wave is blocked by 640, so quarantining 640 strands 701.
   cfg.blockedBy = (id: string) => (id.replace(/^#/, "") === "701" ? ["640"] : []);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // Wave 0 drains green, but integration quarantines 640 on a merge conflict; wave 1's
   // 701 depends on it, so the default (no --auto-prune) pauses the campaign.
@@ -2257,7 +2257,7 @@ test("queue fills to the host ceiling, then writes a spawn per task with climbin
   const taskIds = ["101", "102", "103"];
   // ceiling >= taskIds.length so a lone project gets the whole ceiling and never hits
   // the 1 s re-drive poll — every task spawns in the first `fill()`.
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
 
   const spawned: string[] = [];
   const release: Array<(code: number) => void> = [];
@@ -2300,7 +2300,7 @@ test("queue returns and logs a per-task outcome map translating each child's exi
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-outcomes-"));
   const cfg = harnessCfg(dir);
   const taskIds = ["101", "102", "103"];
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
 
   // `run`'s exit-code contract: 0 → green, 2 → parked, anything else → error(n).
   const codes: Record<string, number> = { "101": 0, "102": 2, "103": 7 };
@@ -2327,7 +2327,7 @@ test("a member whose spawn rejects folds to a failed outcome and frees its slot,
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-reject-"));
   const cfg = harnessCfg(dir);
   // One slot: 102 can only spawn once 101's rejected spawn has released it.
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
   const spawnRun: RunSpawner = async (taskId) => {
     if (taskId === "101") throw new Error("spawn failed");
     return 0;
@@ -2347,7 +2347,7 @@ test("an answered park re-admits on the slot poll while a long sibling still run
   t.mock.timers.enable({ apis: ["setInterval"] });
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-readmit-poll-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
 
   // 101 is the long-running sibling, held open until the test releases it; 102 parks with a record.
   let release101!: (code: number) => void;
@@ -2387,7 +2387,7 @@ const queueReadmitRecordingSpawns = async (
   t.mock.timers.enable({ apis: ["setInterval"] });
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-readmit-resume-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let release101!: (code: number) => void;
   const spawns: Array<[string, string | undefined, string | undefined]> = [];
   const spawnRun: RunSpawner = (taskId, resumeSession, resumePrompt) => {
@@ -2437,7 +2437,7 @@ test("an answered park re-admitted mid-drain spawns without the conflict prompt 
 test("a child killed by a signal with no stop requested is still a failure, named by the signal (#464)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-sigkill-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 3, weight: 1 };
   // The OOM killer took the child: it exits on SIGKILL, and no stop was ever requested.
   const spawnRun: RunSpawner = async () => "SIGKILL";
 
@@ -2491,7 +2491,7 @@ const writeStoppedRecord = (cfg: ResolvedConfig, taskId: string) => {
 test("a graceful stop (SIGINT) lets the wave in flight drain and integrate, then parks `stopped` before the next wave (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-graceful-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const integrated: string[][] = [];
   let stop!: ReturnType<typeof stopDeps>;
   // Wave 1's child takes the Ctrl-C mid-run, then finishes green as normal.
@@ -2542,7 +2542,7 @@ test("a graceful stop (SIGINT) lets the wave in flight drain and integrate, then
 test("a graceful stop over a wave that parks on a question keeps the member's own reason (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-question-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let stop!: ReturnType<typeof stopDeps>;
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
     if (id === "101") stop.h.fire("SIGINT");
@@ -2565,7 +2565,7 @@ test("a graceful stop over a wave that parks on a question keeps the member's ow
 test("a graceful stop on the last wave lets the campaign finish done (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-last-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let stop!: ReturnType<typeof stopDeps>;
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
     if (id === "102") stop.h.fire("SIGINT");
@@ -2609,7 +2609,7 @@ for (const [label, signals] of [
   test(`a --now stop (${label}) signals the runs, waits for them, skips integration and parks \`stopped\` (#403)`, async () => {
     const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-"));
     const cfg = harnessCfg(dir);
-    const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+    const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
     const kids = signalledChildren(cfg);
     const integrated: string[][] = [];
     const stop = stopDeps(
@@ -2644,7 +2644,7 @@ for (const [label, signals] of [
 test("a --now stop where a member fails outright stops the campaign failed — failure outranks the stop (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-failed-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const kids = signalledChildren(cfg, { "101": 1 });
   const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
   const running = silenceConsole(() => campaign(cfg, [["101", "102"]], host, undefined, {}, stop.deps));
@@ -2672,7 +2672,7 @@ const killedChildren = () => {
 test("a --now stop that kills a child before it reached a verdict parks the member `stopped`, not failed (#464)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const kids = killedChildren();
   const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
   const running = silenceConsole(() => campaign(cfg, [["101"]], host, undefined, {}, stop.deps));
@@ -2709,7 +2709,7 @@ const queueKilledByStop = (
   resumeSessions: Record<string, string> = {},
 ) => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-queue-killed-"));
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let stopped = false;
   const spawnRun: RunSpawner = async () => {
     child();
@@ -2723,7 +2723,7 @@ test("an answered re-admit of a crash-redrive member a --now stop kills after it
   t.mock.timers.enable({ apis: ["setInterval"] });
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-readmit-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // 101 runs on while 102 — a crash redrive — parks with a record and is answered mid-drain. The
   // re-admitted 102 consumes the answered record, then a --now stop kills it before its verdict.
   let release101!: (code: number) => void;
@@ -2856,7 +2856,7 @@ test("a verdict logged before the member's latest spawn does not decide a child 
 test("a --now stop that kills a child after it logged failed still ends the campaign failed (#464)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-killed-failed-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const kids = killedChildren();
   const spawnRun: RunSpawner = (id) => {
     cfg.log.log("failed", { taskId: id, detail: "agent error" });
@@ -2878,7 +2878,7 @@ test("a --now stop that kills a child after it logged failed still ends the camp
 test("a --now stop spawns no queued member — with a ceiling of one the second member never starts (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-ceiling-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
   const kids = signalledChildren(cfg);
   const stop = stopDeps(gitFreeDeps(cfg, kids.spawnRun), () => setImmediate(kids.releaseAll));
   const running = silenceConsole(() => campaign(cfg, [["101", "102"]], host, undefined, {}, stop.deps));
@@ -2894,7 +2894,7 @@ test("a --now stop while an answered member re-runs after the grace window signa
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-now-readmit-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let readmitted: (() => void) | undefined;
   const spawnRun: RunSpawner = (id) => {
     if (id === "101") return Promise.resolve(0);
@@ -2942,7 +2942,7 @@ test("a graceful stop during the grace window ends the wait: the waiter is told 
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-grace-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const spawnRun: RunSpawner = async (id) => {
     if (id === "102") {
       seedParkedRecord(cfg, "102");
@@ -2996,7 +2996,7 @@ test("campaignStoppedNotice is a campaign-park notice whose recovery is a plain 
 test("a wave held by a `stopped` member (no operator stop) points at redrive, never at answering it (#441)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-member-stopped-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // 102's run was signalled outside vetinari: it parked itself `stopped` and exited 2; 101 went green.
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
     if (id === "102") {
@@ -3036,7 +3036,7 @@ test("a wave held by a `stopped` member (no operator stop) points at redrive, ne
 test("redrive after a stop re-runs the stopped member and lands the banked green without rerunning it (#403)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-stop-redrive-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   // A --now stop at wave 0: 101 parked itself `stopped` (its record on disk); 102 had gone green.
   cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
@@ -3072,7 +3072,7 @@ const writeOutdatedAgentRecord = (cfg: ResolvedConfig, taskId: string) => {
 test("a wave held by an `outdated-agent` member parks `outdated-agent` — even beside a question — and points at `vetinari build`, then redrive (#444)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
     if (id === "102") writeOutdatedAgentRecord(cfg, "102");
     if (id === "103") seedParkedRecord(cfg, "103");
@@ -3107,7 +3107,7 @@ test("grace window: a wave whose only parked member is `outdated-agent` skips th
   const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-grace-"));
   const cfg = harnessCfg(dir);
   cfg.parkGraceSeconds = 30;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let graceCalls = 0;
   const deps: CampaignDeps = {
     ...gitFreeDeps(cfg, async (id) => {
@@ -3132,7 +3132,7 @@ test("grace window: a wave whose only parked member is `outdated-agent` skips th
 test("a redrive re-runs an `outdated-agent` member rather than holding the wave on its record (#444)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-redrive-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   cfg.log.log("campaign-start", { waves: [["101", "102"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
   cfg.log.log("green", { taskId: "102", branch: "agent/102", commits: ["b"] });
@@ -3151,7 +3151,7 @@ test("a redrive re-runs an `outdated-agent` member rather than holding the wave 
 test("a wave with a failed member still ends campaign-failed beside an `outdated-agent` member (#444)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-outdated-agent-failed-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const childRun: CampaignDeps["spawnRun"] = async (id) => {
     if (id === "102") {
       writeOutdatedAgentRecord(cfg, "102");
@@ -3172,7 +3172,7 @@ test("a live prune that would empty a slot-starved in-flight wave keeps its memb
   const dir = mkdtempSync(join(tmpdir(), "vetinari-prune-starved-"));
   // 102 is blocked by 101, so pruning 101 closes over the whole in-flight wave [101, 102].
   const cfg = { ...harnessCfg(dir), blockedBy: async (id: string) => (id === "102" ? ["101"] : []) } as ResolvedConfig;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
   // Another project's live campaign holds the host's only slot, so wave 1 opens with every member unstarted.
   const other = { pid: process.ppid };
   registerProject(host.configDir, "other", 1, "campaign", 1, other);
@@ -3200,7 +3200,7 @@ test("a live prune that would empty a slot-starved in-flight wave keeps its memb
 test("a prune of a crashed campaign's in-flight wave (no live flag) drops its unstarted members, and a resume runs the next wave (#651)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-prune-crashed-"));
   const cfg = { ...harnessCfg(dir), blockedBy: async (id: string) => (id === "102" ? ["101"] : []) } as ResolvedConfig;
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 1, weight: 1 };
   // The campaign opened wave 1 and died before spawning anything.
   cfg.log.log("campaign-start", { waves: [["101", "102"], ["103"]], slots: 1 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "102"] });
@@ -3221,7 +3221,7 @@ test("a prune of a crashed campaign's in-flight wave (no live flag) drops its un
 test("a redrive after a manual prune of a conflict-parked target neither spawns nor re-integrates it, and closes the wave (#559)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-pruned-conflict-"));
   const cfg = harnessCfg(dir);
-  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   cfg.log.log("campaign-start", { waves: [["101", "701"]], slots: 4 });
   cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
   cfg.log.log("merged", { taskId: "101" });

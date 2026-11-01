@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { register } from "./registry.ts";
 import { logFileOf } from "./dashboard-model.ts";
-import { slotsDir } from "./host-slots.ts";
+import { slotsDir } from "./lease.ts";
 import { event } from "./event-log.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
 import type { StartedChild } from "./dashboard-child.ts";

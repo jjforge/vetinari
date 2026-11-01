@@ -11,7 +11,7 @@ import {
   selectStatus,
 } from "./dashboard-model.ts";
 import { renderLandingShell, renderStatusPage } from "./dashboard-render.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { latestCampaignSlowGates, readSlowGateLogs } from "./slow-gates.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
 

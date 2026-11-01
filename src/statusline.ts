@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { loadConfig, type ResolvedConfig } from "./config.ts";
 import { gitRead } from "./git-read.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { gatewayConfigDir } from "./registry.ts";
 import { buildStatus, type CampaignStatus, type IssueStatus, liveWaves } from "./status.ts";
 import { reasonWord } from "./dashboard-visual-state.ts";

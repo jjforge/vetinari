@@ -41,9 +41,9 @@ const depsWithRepo = (repo: string | undefined) => ({
 // Seed a running campaign onto the temp log: `campaign-start` with waves
 // (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
 // marking wave 0 in-flight — so grafts land in a *future* wave, as they do live.
-const launch = (cfg: ResolvedConfig, batches: string[][]) => {
-  cfg.log.log("campaign-start", { waves: batches, slots: 4 });
-  cfg.log.log("wave-start", { index: 0, tasks: batches[0] });
+const launch = (cfg: ResolvedConfig, waves: string[][]) => {
+  cfg.log.log("campaign-start", { waves, slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: waves[0] });
 };
 
 test("graft with no ids is rejected before any campaign lookup", async () => {

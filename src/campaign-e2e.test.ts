@@ -15,7 +15,7 @@ import { runGates } from "./gate.ts";
 import { buildStatus } from "./dashboard-status.ts";
 import { describeEvent } from "./dashboard-event-text.ts";
 import { inFlightRunning } from "./dashboard-live-tail.ts";
-import type { HostBudget } from "./host-slots.ts";
+import type { HostCeiling } from "./lease.ts";
 import { makeLocalSandbox, type LocalAgentScript } from "./sandbox-local.ts";
 import { gitOut, seedConflictRepo, seedRepo } from "./test-support.ts";
 
@@ -250,7 +250,7 @@ const resolvingConflictScript =
     return { signal: DONE, stdout: `<turn-summary>rewrote conflict.txt in ${id}</turn-summary>` };
   };
 
-const host = (dir: string): HostBudget => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
+const host = (dir: string): HostCeiling => ({ configDir: join(dir, "host"), ceiling: 2, weight: 1 });
 
 for (const provider of ["claude", "cursor"] as const) {
   test(`scenario 9 (${provider}): a green whose merge collides is retried by its own agent in the same wave — it resolves, merges, and the wave completes with no park (#624)`, async () => {
@@ -929,8 +929,8 @@ test("scenario 1: two all-green waves merge in order, the base is gated between 
   const events = readEventLog(cfg);
 
   // Both waves ran, in order.
-  const batches = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.tasks);
-  assert.deepEqual(batches, [["101"], ["102"]], "the two waves ran in order");
+  const waves = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.tasks);
+  assert.deepEqual(waves, [["101"], ["102"]], "the two waves ran in order");
 
   // Each wave integrated its green, in order — integrateGreens logs one per wave.
   const integrated = events.filter((e: any) => e.event === "campaign-integrated").map((e: any) => e.merged);
@@ -970,8 +970,8 @@ test("scenario 3: a failed member drains its wave — the sibling merges — the
   const events = readEventLog(cfg);
 
   // Only wave 0 ran — the failure held the wave and no succeeding wave started.
-  const batches = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.index);
-  assert.deepEqual(batches, [0], "only wave 0 ran — no succeeding wave started");
+  const waveIndexes = events.filter((e: any) => e.event === "wave-start").map((e: any) => e.index);
+  assert.deepEqual(waveIndexes, [0], "only wave 0 ran — no succeeding wave started");
   assert.equal(gitOut(dir, ["branch", "--list", "agent/201"]), "", "the succeeding wave's issue never ran");
 
   // The sibling still merged — a failure never aborts or un-merges a sibling.

@@ -17,14 +17,14 @@ import {
   resolveHostCeiling,
   slotsDir,
   withHostSlot,
-  type HostBudget,
-} from "./host-slots.ts";
+  type HostCeiling,
+} from "./lease.ts";
 import { Refusal } from "./refusal.ts";
 import { withEnv } from "./test-support.ts";
 
 const freshDir = () => mkdtempSync(join(tmpdir(), "vetinari-slots-"));
 const alive = () => true;
-const budget = (configDir: string, ceiling: number, weight = 1): HostBudget => ({ configDir, ceiling, weight });
+const budget = (configDir: string, ceiling: number, weight = 1): HostCeiling => ({ configDir, ceiling, weight });
 
 test("a project running alone gets the whole budget", () => {
   assert.equal(fairShare(8, { solo: 1 }, "solo"), 8);

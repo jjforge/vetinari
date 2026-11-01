@@ -101,7 +101,7 @@ function citedPaths(body: string, onMarkerLine = false): string[] {
   for (const m of normalized.matchAll(CITE_RE)) {
     // Strip a trailing `:line[:col]` before anything else, so a line-numbered cite
     // is path-shaped and resolves to the real file rather than an unmatchable
-    // `host-slots.ts:329` the tree never contains (#388).
+    // `lease.ts:329` the tree never contains (#388).
     // An unbackticked token also drops a trailing sentence period (`See docs/x.md.`),
     // which the bare branch takes in; a backticked token is exactly what was fenced (#653).
     const raw = (m[1] ?? m[2].replace(/\.+$/, "")).trim().replace(LINE_SUFFIX_RE, "");

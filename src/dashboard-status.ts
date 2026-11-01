@@ -6,7 +6,7 @@ import { type ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { type ProjectPointer } from "./registry.ts";
 import { listParked, parkedDirOf, type ParkedRecord, type ParkReason } from "./state.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
 import { campaignBaseGates, waveTimeSplit, type WaveTimeSplit } from "./report.ts";
 import { normalize } from "./issue-id.ts";

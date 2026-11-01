@@ -54,7 +54,7 @@ import {
   type Reporter,
   waveTimeSplit,
 } from "./report.ts";
-import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostBudget } from "./host-slots.ts";
+import { acquireSlot, deregisterProject, registerProject, releaseSlot, type HostCeiling } from "./lease.ts";
 
 /**
  * A campaign's terminal verdict (design §5 step 6, §15): `done` only when the last wave
@@ -436,7 +436,7 @@ async function stoppedRunOutcome(cfg: ResolvedConfig, taskId: string, signal: No
 export async function queue(
   cfg: ResolvedConfig,
   taskIds: string[],
-  host: HostBudget,
+  host: HostCeiling,
   titles?: Record<string, string>,
   spawnRun: RunSpawner = selfSpawnRun,
   reporter: Reporter = envReporter(),
@@ -974,9 +974,9 @@ export function reconcileResumeWave(
 }
 
 /**
- * Drain each batch, then merge its greens into the base, re-verify the merged
+ * Drain each wave, then merge its greens into the base, re-verify the merged
  * base, clean up the merged branches/worktrees, and only then start the next
- * batch — the manual merge→test→next-queue chain, automated.
+ * wave — the manual merge→test→next-queue chain, automated.
  *
  * Green-only by design: only green branches are merged. A wave boundary clears NO
  * parked records (design §2.5): a held member's record survives the boundary so it
@@ -1001,13 +1001,13 @@ export function reconcileResumeWave(
  * `reconcileResumeWave`) — landing a green-but-unmerged member without a rerun, re-running
  * an answered park (its record gone), re-parking one whose record remains, and stopping as
  * failed again on a failed member unless `opts.override` re-runs it. Every later wave runs
- * fresh. The supplied `batches`/`name` are ignored under resume; the plan comes from the
+ * fresh. The supplied `waves`/`name` are ignored under resume; the plan comes from the
  * log. A resume with nothing left to run reports so and returns `done`.
  */
 export async function campaign(
   cfg: ResolvedConfig,
-  batches: string[][],
-  host: HostBudget,
+  waves: string[][],
+  host: HostCeiling,
   name?: string,
   opts: {
     autoPrune?: boolean;
@@ -1019,7 +1019,7 @@ export async function campaign(
   deps: CampaignDeps = defaultCampaignDeps,
 ): Promise<CampaignOutcome> {
   // Every green branch merges into whatever the main tree has checked out, and
-  // each batch's agents cut their branch from that same HEAD. If it is not the
+  // each wave's agents cut their branch from that same HEAD. If it is not the
   // base branch the campaign would merge into, and build on, the wrong place.
   const branch = deps.currentBranch();
   if (branch !== cfg.baseBranch) {
@@ -1081,7 +1081,7 @@ export async function campaign(
     if (opts.resume) {
       const nothingToRun = resumeCampaign(c);
       if (nothingToRun) return nothingToRun;
-    } else await startCampaign(c, batches, name);
+    } else await startCampaign(c, waves, name);
 
     // Only the first wave a redrive re-enters is reconciled against the log (design §7);
     // every later wave was never started, so it runs fresh.
@@ -1134,7 +1134,7 @@ type CampaignOpts = NonNullable<Parameters<typeof campaign>[4]>;
 /** What every step of `campaign()` reads: the run's fixed inputs, plus the shared `s` it mutates. */
 interface CampaignRunContext {
   cfg: ResolvedConfig;
-  host: HostBudget;
+  host: HostCeiling;
   opts: CampaignOpts;
   deps: CampaignDeps;
   reporter: Reporter;
@@ -1146,7 +1146,7 @@ interface CampaignRunContext {
 /**
  * Resume a paused campaign (ADR 0013): reconstruct the existing plan from the log —
  * no new `campaign-start`, no re-resolved titles — and skip every wave that already
- * banked work so no merged issue is redone. The supplied `batches`/`name` are ignored;
+ * banked work so no merged issue is redone. The supplied `waves`/`name` are ignored;
  * the plan is whatever the running campaign's `campaign-start` (minus any prune) reduced to.
  * Returns `done` when nothing is left to run.
  */
@@ -1197,21 +1197,21 @@ function resumeCampaign(c: CampaignRunContext): CampaignOutcome | undefined {
 }
 
 /** Start a fresh campaign: resolve its titles, then log and announce its plan. */
-async function startCampaign(c: CampaignRunContext, batches: string[][], name: string | undefined): Promise<void> {
+async function startCampaign(c: CampaignRunContext, waves: string[][], name: string | undefined): Promise<void> {
   const { cfg, host, opts, reporter, s } = c;
   // Resolve the run's issue titles up front (the orchestrator has `fetchTask`) and
   // record them on the start event, so the dumb-router dashboard names every wave
   // and chip — live and archived — with no lookup of its own (ADR 0002). `name` is
   // still recorded only when given; a run whose titles could not be resolved simply
   // omits them and degrades to `number:status`.
-  s.titles = await resolveTitles(cfg, batches.flat());
+  s.titles = await resolveTitles(cfg, waves.flat());
   s.campaignName = name;
   // Record the plan, the slot budget, and — once — the optional `--name` and the id→title
   // map, so the dumb-router dashboard names every wave and chip with no lookup of its own
   // (design §2.1, ADR 0002). No presentation state is written: the festive wave name is
   // derived at render from this event's timestamp, not a cursor stamped here.
   const startEvent: Omit<CampaignStartEvent, "ts" | "event"> = {
-    waves: batches,
+    waves,
     slots: host.ceiling,
   };
   if (name) startEvent.name = name;
@@ -1225,14 +1225,14 @@ async function startCampaign(c: CampaignRunContext, batches: string[][], name: s
       emoji: "🎬",
       project: cfg.project,
       state: "CAMPAIGN",
-      context: `${batches.length} waves${named(name)}`,
-      signal: batches.map((b) => b.join(",")).join(" | "),
+      context: `${waves.length} waves${named(name)}`,
+      signal: waves.map((w) => w.join(",")).join(" | "),
       category: "progress",
       event: "campaign-start",
     }),
   );
   // The plan, on the terminal: the waves with their ids and titles (design §11).
-  reporter.line(formatPlan(batches, s.titles, s.campaignName));
+  reporter.line(formatPlan(waves, s.titles, s.campaignName));
 }
 
 /**

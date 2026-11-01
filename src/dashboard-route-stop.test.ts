@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { slotsDir } from "./host-slots.ts";
+import { slotsDir } from "./lease.ts";
 import type { ChildResult } from "./dashboard-child.ts";
 import type { DashboardDeps } from "./dashboard-http.ts";
 import { handleStop } from "./dashboard-route-stop.ts";

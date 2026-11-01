@@ -188,7 +188,7 @@ export interface IssueDetail {
 
 /** Does this event name the given issue by an id it carries — its `taskId`, or a
  * membership in one of the id-bearing arrays/maps (`taskIds`, `merged`, `removed`,
- * `queue-done` outcomes)? The plan-only `campaign-start` `batches` are excluded so
+ * `queue-done` outcomes)? The plan-only `campaign-start` `waves` are excluded so
  * the working span starts when work does, not at campaign launch. */
 const eventNamesIssue = (e: OrchestratorEvent, id: string): boolean => {
   if ("taskId" in e && e.taskId != null && normalize(String(e.taskId)) === id) return true;

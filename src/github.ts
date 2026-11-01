@@ -261,7 +261,7 @@ export const githubIssuesByLabel = (
  * merged-base gate — "merged on branch, awaiting a local end-to-end validation",
  * which is exactly `pending-verify`; closing stays a separate, human/verify step.
  * Idempotent: re-adding `pending-verify`, or removing `ready-for-agent` from an
- * issue that never carried it (a manual `campaign` batch), is harmless. `run` is
+ * issue that never carried it (a manual `campaign` wave), is harmless. `run` is
  * injected only so the argument building can be tested without invoking `gh`.
  */
 export const githubMarkPendingVerify = (

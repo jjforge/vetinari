@@ -1,6 +1,6 @@
 import { listProjects } from "./registry.ts";
 import { buildStatus, campaignState, liveWaves, statusConfigFromPointer } from "./dashboard-model.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { redriveAllowed } from "./dashboard-visual-state.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 import { respondWithStartedChild } from "./dashboard-child.ts";

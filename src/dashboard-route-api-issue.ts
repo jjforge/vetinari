@@ -3,7 +3,7 @@ import { listArchivedRuns, logFileOf, parkedAnswerFor, parkedReplyFor, reconstru
 import { readEventLog } from "./event-log.ts";
 import { listParkedIn, parkedDirOf } from "./state.ts";
 import type { RouteHandler } from "./dashboard-http.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 
 /**
  * `GET /api/issue?project=<name>&issue=<number>[&run=<token>]` — one issue's

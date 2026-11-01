@@ -1,5 +1,5 @@
 import { listProjects } from "./registry.ts";
-import { projectHasLiveCampaign } from "./host-slots.ts";
+import { projectHasLiveCampaign } from "./lease.ts";
 import { readBody, type RouteHandler } from "./dashboard-http.ts";
 
 /**

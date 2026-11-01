@@ -248,7 +248,7 @@ test("strandedByConflict skips a quarantined id no longer in the plan (an earlie
 });
 
 test("resumeIndex skips closed waves and points at the first wave that did not close", () => {
-  // Waves 0 and 1 closed (batch-done), wave 2 never started: resume picks up at wave 2.
+  // Waves 0 and 1 closed (wave-done), wave 2 never started: resume picks up at wave 2.
   const index = resumeIndex({
     waves: [["611", "640"], ["623"], ["701", "712"]],
     closedWaves: new Set([0, 1]),
@@ -257,7 +257,7 @@ test("resumeIndex skips closed waves and points at the first wave that did not c
 });
 
 test("resumeIndex re-enters a wave-parked wave whose greens merged but never closed", () => {
-  // Wave 1 wave-parked: its greens merged though the wave never closed (no batch-done).
+  // Wave 1 wave-parked: its greens merged though the wave never closed (no wave-done).
   // The redrive re-enters wave 1 to reconcile it — its already-merged greens are landed
   // (not respawned) by the wave's reconciliation, not skipped over here.
   const index = resumeIndex({
@@ -356,9 +356,9 @@ const depsWithRepo = (repo: string | undefined) => ({
 // Seed a running campaign onto the temp log: `campaign-start` with waves
 // (unsettled — no member merged, so the fold reads it as open) plus a `wave-start`
 // marking wave 0 in-flight.
-const launch = (cfg: ResolvedConfig, batches: string[][]) => {
-  cfg.log.log("campaign-start", { waves: batches, slots: 4 });
-  cfg.log.log("wave-start", { index: 0, tasks: batches[0] });
+const launch = (cfg: ResolvedConfig, waves: string[][]) => {
+  cfg.log.log("campaign-start", { waves, slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: waves[0] });
 };
 
 test("runPrune rejects a missing target before any campaign lookup", async () => {
@@ -843,8 +843,8 @@ test("runPrune with an explicit plan launches a fresh reduced campaign", async (
     },
     {
       ...defaultPruneDeps,
-      launchCampaign: async (_cfg, batches) => {
-        launched.push(batches);
+      launchCampaign: async (_cfg, waves) => {
+        launched.push(waves);
         return "done";
       },
     },
@@ -881,8 +881,8 @@ test("runPrune --dry-run on an explicit plan previews but launches nothing", asy
     },
     {
       ...defaultPruneDeps,
-      launchCampaign: async (_cfg, batches) => {
-        launched.push(batches);
+      launchCampaign: async (_cfg, waves) => {
+        launched.push(waves);
         return "done";
       },
     },

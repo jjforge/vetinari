@@ -18,7 +18,7 @@ import { resolve } from "node:path";
 import { assertProjectQualifier, repoForProject, resolveProjectRoot, type ResolvedConfig } from "./config.ts";
 import { Refusal } from "./refusal.ts";
 import { describeBranchPurge, purgeBranches, type BranchPurge, type PurgeTarget } from "./merge.ts";
-import type { HostBudget } from "./host-slots.ts";
+import type { HostCeiling } from "./lease.ts";
 import { normalize } from "./issue-id.ts";
 import { campaignSettled, campaignStarted, reduceCampaign } from "./campaign-fold.ts";
 import { issueNameFromTask } from "./dashboard-event-text.ts";
@@ -287,7 +287,7 @@ export const defaultPruneDeps: PruneDeps = {
   describeBranchPurge,
   purgeBranches,
   // Lazy-import to keep `modes` out of the static graph — see the `Campaign` note.
-  launchCampaign: (cfg, batches, host, name, opts) => import("./modes.ts").then((m) => m.campaign(cfg, batches, host, name, opts)),
+  launchCampaign: (cfg, waves, host, name, opts) => import("./modes.ts").then((m) => m.campaign(cfg, waves, host, name, opts)),
 };
 
 export interface PruneOptions {
@@ -306,7 +306,7 @@ export interface PruneOptions {
    *  of pruning the running one. Absent/empty → prune the running campaign. */
   plan?: string[][];
   /** host budget threaded to the fresh-launch path's `campaign()`. */
-  host?: HostBudget;
+  host?: HostCeiling;
   /**
    * Whether a live campaign holds this project (the CLI's lease probe). When it does and the
    * plan has an in-flight wave, that wave's unstarted members are kept — the loop runs the

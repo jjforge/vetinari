@@ -6,9 +6,9 @@ import { pidAlive, withFileLockSync } from "./file-lock.ts";
 import { Refusal } from "./refusal.ts";
 
 /**
- * The host slot budget (ADR 0010): a cooperative filesystem lease every
- * `campaign`/`queue` run reads and writes directly so the sum of live containers
- * across every project stays within a host-side ceiling. Split into a pure
+ * The lease (ADR 0010): a cooperative filesystem lease every `campaign`/`queue`
+ * run reads and writes directly so the sum of live containers across every
+ * project honours the host's max concurrent containers. Split into a pure
  * fair-share computation and the impure lease edge; the gateway never allocates.
  */
 
@@ -54,7 +54,7 @@ export interface LeaseOpts {
  * (mapped from its `containerShare` tier). Always present — the ceiling is in
  * effect for every run (ADR 0011), machine-derived when nothing is set.
  */
-export interface HostBudget {
+export interface HostCeiling {
   configDir: string;
   ceiling: number;
   weight: number;
@@ -316,7 +316,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * already holds a slot for it.
  */
 export async function withHostSlot<T>(
-  host: HostBudget,
+  host: HostCeiling,
   project: string,
   fn: () => Promise<T>,
   opts: LeaseOpts & { wait?: (ms: number) => Promise<void> } = {},

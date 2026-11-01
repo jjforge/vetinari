@@ -220,7 +220,7 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase, perMergeGate
  * `red-base` park writes no per-issue record), design §2.5.
  *
  * Assumes the main working tree is already on `cfg.baseBranch` (campaign ensures it) so
- * a merge advances HEAD in place and the next batch cuts from it.
+ * a merge advances HEAD in place and the next wave cuts from it.
  */
 export async function integrateGreens(
   cfg: ResolvedConfig,

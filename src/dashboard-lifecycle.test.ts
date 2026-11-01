@@ -155,7 +155,7 @@ test("reduceCampaign: a bare green is running-with-a-pending-green, completed on
   assert.equal(merged.pendingGreen.has("101"), false, "the pending-green flag clears on merge");
   assert.equal(merged.mergedAt.get("101"), "t4", "mergedAt is the merge stamp, not the green stamp");
 
-  // A wave-done's `merged` list banks it the same way (the batch-merge path).
+  // A wave-done's `merged` list banks it the same way (the wave-merge path).
   const waveDone = reduceCampaign([...base, event("wave-done", { ts: "t5", index: 0, merged: ["101"] })]);
   assert.equal(waveDone.outcomes.get("101"), "completed");
   assert.equal(waveDone.pendingGreen.has("101"), false);

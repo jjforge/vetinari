@@ -9,7 +9,7 @@ import { notice } from "./notice.ts";
 import { HARVEST_PROMPT, findingKey, parseFindings, triageFindings } from "./findings.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event, readEventLog } from "./event-log.ts";
-import { withHostSlot, type HostBudget } from "./host-slots.ts";
+import { withHostSlot, type HostCeiling } from "./lease.ts";
 
 /**
  * The files a single commit touched, from the host repo (the agent branch's objects share the host
@@ -837,7 +837,7 @@ async function failRun(s: RunState, err: any): Promise<Outcome> {
 export async function runLoop(
   cfg: ResolvedConfig,
   taskId: string,
-  host?: HostBudget,
+  host?: HostCeiling,
   start?: ResumeEntry | ReentryEntry,
   deps: LoopDeps = defaultLoopDeps,
 ): Promise<Outcome> {

@@ -54,7 +54,7 @@ Waves, campaigns and the project card roll up from their issues in this order: f
 | `red-base` | every issue passed alone; the merged base fails together | fix forward on the base, then redrive |
 | `crash` | the run died with no verdict | redrive |
 | `stopped` | you stopped the run (Ctrl-C / SIGTERM) before it reached a verdict; its work is kept | `vetinari run <id>` for a standalone run, or redrive a campaign |
-| `outdated-agent` | the image's agent CLI is too old for the model, so the run could not start | rebuild with `vetinari build`, then redrive (or `vetinari run <id>` for a standalone run) |
+| `outdated-agent` | the agent CLI is too old for the model, so the run could not start | update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then redrive (or `vetinari run <id>` for a standalone run) |
 
 **Your six moves.** These are the only things a human ever does to a campaign:
 
@@ -110,7 +110,7 @@ Once per machine: put the CLI on PATH with `vetinari install` (bootstrap it as `
 
 ## Running with GitHub Copilot
 
-For a team whose only agent is GitHub Copilot. The shipped image installs the Copilot CLI; rebuild with `vetinari build` if yours predates it. Copilot keeps its session like Claude: each issue's Copilot state lives in `.vetinari.local/copilot/<task-id>/`, mounted into that issue's agent container, and is removed when the issue merges.
+For a team whose only agent is GitHub Copilot. The shipped image installs the Copilot CLI; if yours predates it, run `vetinari build` to rebuild it. Copilot keeps its session like Claude: each issue's Copilot state lives in `.vetinari.local/copilot/<task-id>/`, mounted into that issue's agent container, and is removed when the issue merges.
 
 - **The token.** Create a fine-grained personal access token with only the **Copilot Requests** permission and no repository access, and put it in `.vetinari.local/.env` as `COPILOT_GITHUB_TOKEN`. The token goes into the agent's container, so it must not carry repo scopes. `gh auth token` works for a quick local try-out, but that token carries your full `gh` scopes (repo and org access), so a container agent holding it could act on any repository you can. Don't use it for real runs.
 - **The org policy.** The organization or enterprise must enable the **Copilot CLI** policy for the account; without it, every run fails at the agent.

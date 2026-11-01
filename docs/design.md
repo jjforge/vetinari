@@ -127,7 +127,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker since the latest wave-start) | no | yes |
 | `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
-| `outdated-agent` | run loop when the agent call throws the provider's "CLI too old for this model" error (`detail` is that line; only `claude` has a pattern) | no | yes — after `vetinari build`; a redrive, or `vetinari run <id>` for a standalone run |
+| `outdated-agent` | run loop when the agent call throws the provider's "CLI too old for this model" error (`detail` is that line; only `claude` has a pattern) | no | yes — after updating the agent CLI in the project's sandbox (`vetinari build` for the default Docker image); a redrive, or `vetinari run <id>` for a standalone run |
 
 ### 2.4 Roll-ups
 
@@ -188,7 +188,7 @@ For each wave:
 5. **Resolve.** The wave is done only when every member is `completed`, in this order:
    - any member `failed` → log `campaign-failed`, notify, exit non-zero (failure outranks a red base or a park, §2.4);
    - the merged base red → log `campaign-parked` (the wave's reason `red-base`), notify, exit non-zero;
-   - any member `parked` (question, stalled, conflict, stopped, outdated-agent) → log `campaign-parked`, notify, exit non-zero. An `outdated-agent` member outranks every other member reason: the wave's reason is `outdated-agent` and the notice names `vetinari build`, then `vetinari redrive`. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
+   - any member `parked` (question, stalled, conflict, stopped, outdated-agent) → log `campaign-parked`, notify, exit non-zero. An `outdated-agent` member outranks every other member reason: the wave's reason is `outdated-agent` and the notice says to update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then `vetinari redrive`. A conflict that strands dependents in later waves is named in the notice; `--auto-prune` prunes the stranded closure instead of stopping — it decides what happens to the *dependents*, never whether the conflicted member itself holds the wave;
    - otherwise log `wave-done` and continue.
 6. On the last wave: log `campaign-done`, notify, archive the run, exit zero. Once the campaign is running, every exit code is set by its outcome: zero only for `campaign-done`. A campaign refused before it runs (no ids, the interactive under-specified stop, a missing resolver) has no outcome and exits `4`.
 
@@ -231,7 +231,7 @@ Reconciliation, per member of the first wave that is not fully `completed`:
 | `parked(red-base)` after a fix-forward | re-gate the base — even when nothing new merges — then continue; when the re-gate is green, every member of the wave merged onto the base (including those merged before the park) gets the merged hook (`onIssueMerged`) once |
 | `parked(crash)` | treat as unstarted if no commits, else resume the session |
 | `parked(stopped)` | re-run — a stopped record never holds the wave; the child consumes it, resuming the session when it can |
-| `parked(outdated-agent)` | re-run, exactly as `parked(stopped)` — without a rebuild it parks `outdated-agent` again |
+| `parked(outdated-agent)` | re-run, exactly as `parked(stopped)` — without updating the agent CLI it parks `outdated-agent` again |
 | `failed` | refused — prune it or fix it first; redrive names it. `redrive --override` re-runs it instead (the only meaning `--override` has on redrive) |
 | `pruned` membership | skipped |
 | `unstarted` / `grafted` | run |

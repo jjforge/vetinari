@@ -238,7 +238,7 @@ const keptTail = (merged: string[], index: number, total: number): string => {
  * stop (`vetinari stop`, Ctrl-C), resumed by a plain `redrive`; `member-stopped` is a wave held by a
  * member whose run was signalled outside an operator stop — redrive-only, never answerable.
  * `outdated-agent` is a wave held by members whose agent CLI is too old for the model (#444):
- * rebuild the image, then redrive.
+ * update the agent CLI, then redrive.
  */
 export type Stop =
   | { kind: "failed"; index: number; total: number; failed: string[]; merged: string[] }
@@ -279,7 +279,7 @@ export function formatStop(stop: Stop): string {
     case "outdated-agent": {
       const tail = keptTail(stop.merged, stop.index, stop.total);
       return (
-        `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")}: the image's agent CLI is too old for the model (outdated-agent); ${tail}\n` +
+        `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")}: the agent CLI is too old for the model (outdated-agent); ${tail}\n` +
         `recover: ${PARK_RECOVERY["outdated-agent"]}`
       );
     }

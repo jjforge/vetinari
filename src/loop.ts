@@ -98,7 +98,7 @@ function printParked(taskId: string, reason: string, question: string) {
     reason === "stopped"
       ? `Continue it with: vetinari run ${taskId}`
       : reason === "outdated-agent"
-        ? `Rebuild the image with: vetinari build\nThen continue it with: vetinari run ${taskId}`
+        ? `Update the agent CLI in the project's sandbox (vetinari build for the default Docker image)\nThen continue it with: vetinari run ${taskId}`
         : `Answer with: vetinari answer ${taskId} "…"`;
   printVerdict(`PARKED (${reason}) — ${firstLine(question)}`, nextStep);
 }
@@ -554,7 +554,8 @@ async function parkStopped(s: RunState): Promise<Outcome> {
 // conventional branch, the last session if any. Redrive-only like `stopped` — nothing to answer.
 async function parkOutdatedAgent(s: RunState, detail: string): Promise<Outcome> {
   const { cfg, taskId } = s;
-  const question = "The image's agent CLI is too old for the model — rebuild the image (vetinari build), then redrive.";
+  const question =
+    "The agent CLI is too old for the model — update it in the project's sandbox (vetinari build for the default Docker image), then redrive.";
   await park(cfg, {
     taskId,
     reason: "outdated-agent",

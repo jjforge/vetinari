@@ -130,7 +130,7 @@ export const AGENT_PROVIDERS: Record<
     efforts: readonly string[];
     credentialKeys: readonly string[];
     /** The agent CLI's own "too old for this model" error. A run whose agent call throws a message
-     * matching it parks `outdated-agent` (rebuild the image) rather than logging `failed`. Matched
+     * matching it parks `outdated-agent` (update the agent CLI) rather than logging `failed`. Matched
      * against each line of the message, so it is never anchored to the first. */
     outdatedAgentPattern?: RegExp;
   }

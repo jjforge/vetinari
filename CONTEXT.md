@@ -150,9 +150,9 @@ kept. It cannot be answered: `vetinari run <id>` continues a standalone run,
 [[redrive]] continues a campaign.
 
 **outdated-agent**:
-The image's [[agent]] CLI is too old for the configured model, so no run can
-start until the image is rebuilt — an environment fault, not the issue's. Rebuild
-the image, then [[redrive]].
+The [[agent]] CLI in the project's sandbox is too old for the configured model, so
+no run can start until it is updated — an environment fault, not the issue's.
+Update it (`vetinari build` for the default Docker image), then [[redrive]].
 _Avoid_: stale image (that is an image older than its Dockerfile, a warning only).
 
 ### The six moves

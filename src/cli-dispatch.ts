@@ -1063,10 +1063,10 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     throw new Refusal(
       `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
     );
-  // An `outdated-agent` park (#444) asked nothing either: the image's agent CLI is too old for the model.
+  // An `outdated-agent` park (#444) asked nothing either: the agent CLI is too old for the model.
   if (reason === "outdated-agent")
     throw new Refusal(
-      `${taskId} parked because the image's agent CLI is too old for the model — it cannot be answered. Rebuild the image with \`vetinari build\`, then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
+      `${taskId} parked because the agent CLI is too old for the model — it cannot be answered. Update the agent CLI in the project's sandbox (\`vetinari build\` for the default Docker image), then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
     );
   // A `conflict` park asked nothing either: the member is green and only its merge conflicted, so
   // an answer would re-run it fresh instead of integrating it. Refused whether or not postComment is set.

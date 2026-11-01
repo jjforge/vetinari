@@ -3112,7 +3112,7 @@ test("a wave held by an `outdated-agent` member parks `outdated-agent` — even 
   const stopLine = lines.find((l) => l.includes("campaign parked at wave 1/2"));
   assert.ok(stopLine, `no stop line printed: ${lines.join("\n")}`);
   assert.match(stopLine, /#102/);
-  assert.match(stopLine, /`vetinari build`, then `vetinari redrive`/);
+  assert.match(stopLine, /`vetinari build` for the default Docker image\), then `vetinari redrive`/);
   assert.ok(!stopLine.includes("vetinari answer"), stopLine);
 
   const notice = listOutbox(cfg).find((n) => n.event === "campaign-parked");

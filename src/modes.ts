@@ -774,7 +774,7 @@ export function memberStoppedNotice(project: string, waveNumber: number, parked:
 
 /**
  * The operator-facing notice a member park enqueues when the wave's reason is `outdated-agent` (#444):
- * the image's agent CLI is too old for the model, so no member can run until it is rebuilt. Redrive-only
+ * the agent CLI is too old for the model, so no member can run until it is updated. Redrive-only
  * — the per-issue records are never announced, so this is the announcement. Pure.
  */
 export function memberOutdatedAgentNotice(
@@ -789,8 +789,8 @@ export function memberOutdatedAgentNotice(
     project,
     state: "PARKED",
     context: `wave ${waveNumber}`,
-    signal: `${parked.map((p) => `#${p}`).join(", ")}: the image's agent CLI is too old for the model — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
-    recover: "`vetinari build`, then `vetinari redrive`",
+    signal: `${parked.map((p) => `#${p}`).join(", ")}: the agent CLI is too old for the model — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
+    recover: PARK_RECOVERY["outdated-agent"],
     category: "failure",
     event: "campaign-parked",
   });

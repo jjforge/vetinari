@@ -17,7 +17,8 @@ export const PARK_RECOVERY: Record<ParkReason, string> = {
   "red-base": "fix forward on the base, then `vetinari redrive`",
   crash: "`vetinari redrive`",
   stopped: "`vetinari redrive` to resume the campaign, or `vetinari run <id>` for a standalone run",
-  "outdated-agent": "rebuild the image with `vetinari build`, then `vetinari redrive`",
+  "outdated-agent":
+    "update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then `vetinari redrive`",
 };
 
 /**

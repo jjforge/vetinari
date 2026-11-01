@@ -135,8 +135,8 @@ test("an outdated-agent stop names the held members and points at `vetinari buil
   const out = formatStop({ kind: "outdated-agent", index: 0, total: 2, parked: ["102", "103"], merged: ["101"] });
   assert.equal(
     out,
-    "🅿 campaign parked at wave 1/2 — #102, #103: the image's agent CLI is too old for the model (outdated-agent); merged #101 kept, 1 wave not started\n" +
-      "recover: rebuild the image with `vetinari build`, then `vetinari redrive`",
+    "🅿 campaign parked at wave 1/2 — #102, #103: the agent CLI is too old for the model (outdated-agent); merged #101 kept, 1 wave not started\n" +
+      "recover: update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then `vetinari redrive`",
   );
 });
 

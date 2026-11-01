@@ -1,5 +1,6 @@
 import { Refusal } from "./refusal.ts";
 import { gitRead } from "./git-read.ts";
+import { VETINARI_PATHS_GATE } from "./merge.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -203,13 +204,20 @@ export const mergeConflictPrompt = (paths: string[], base: string, baseBranch: s
 /**
  * The prompt a failed per-merge check's retry hands the issue's own agent (design §6): its green
  * merged into the base cleanly, but a `perMerge` gate went red on the result and the merge was
- * undone. It names the gate, the tail of its output and the base commit.
+ * undone. It names the gate, the tail of its output and the base commit. A failed
+ * {@link VETINARI_PATHS_GATE} check instead names the undeclared `vetinari/` `paths` and tells the
+ * agent to drop them (ADR 0026): only a human-written brief may authorize a change there.
  */
-export const perMergeCheckPrompt = (gate: string, detail: string, base: string, baseBranch: string) =>
-  `Your merge into the current base, ${baseBranch} at ${base}, fails ${gate}. ` +
-  `Merge ${base} into your branch and fix it, keeping the issue's acceptance criteria satisfied — its tests must still pass. ` +
-  `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.\n\n` +
-  `The tail of ${gate}'s output on the merged tree:\n${detail}`;
+export const perMergeCheckPrompt = (gate: string, detail: string, base: string, baseBranch: string, paths: string[] = []) =>
+  gate === VETINARI_PATHS_GATE
+    ? `Your merge into the current base, ${baseBranch} at ${base}, was undone: it changes ${paths.join(", ")}, under vetinari/, which your issue's brief does not declare. ` +
+      `Files under vetinari/ run on the host, so a change there merges only when a human declares it on the issue's file-set marker line. ` +
+      `Drop those changes from your branch — restore each path to how it is at ${base} — and commit, keeping the issue's acceptance criteria satisfied — its tests must still pass. ` +
+      `If the issue cannot be done without them, signal ${BLOCKED} and say so. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.`
+    : `Your merge into the current base, ${baseBranch} at ${base}, fails ${gate}. ` +
+      `Merge ${base} into your branch and fix it, keeping the issue's acceptance criteria satisfied — its tests must still pass. ` +
+      `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.\n\n` +
+      `The tail of ${gate}'s output on the merged tree:\n${detail}`;
 
 /**
  * How a child `run` enters the loop from what its campaign passed it (design §6, §7): a session to

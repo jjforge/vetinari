@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { VETINARI_PATHS_GATE } from "./merge.ts";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1374,6 +1375,15 @@ test("a failed per-merge check's retry prompt names the gate, its output tail an
   assert.match(prompt, /Merge f00dfeed into your branch and fix it/);
   assert.ok(prompt.includes("b.go:12: healthClass redeclared in this block"), "the output tail rides along");
   assert.match(prompt, /acceptance criteria/);
+});
+
+test("a vetinari-paths retry prompt names the undeclared vetinari/ paths and tells the agent to drop them from its branch (#607)", () => {
+  const prompt = perMergeCheckPrompt(VETINARI_PATHS_GATE, "d", "f00dfeed", "main", ["vetinari/config.mts"]);
+  assert.ok(prompt.includes("vetinari/config.mts"), "names the path");
+  assert.match(prompt, /f00dfeed/);
+  assert.match(prompt, /brief does not declare/);
+  assert.match(prompt, /Drop those changes from your branch/);
+  assert.doesNotMatch(prompt, /and fix it/, "not the generic per-merge check prompt");
 });
 
 test("childRunEntry resumes a crashed session with the crash prompt when no conflict prompt is set, and is a fresh run with neither (#624)", () => {

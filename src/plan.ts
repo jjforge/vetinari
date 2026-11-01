@@ -284,7 +284,7 @@ const keyBasename = (k: string) => k.slice(k.lastIndexOf("/") + 1);
  * tree directories, or a bare `Creates:` cite — collides with every key of that name,
  * bare or not, since it names no one path.
  */
-const keysCollide = (a: string, b: string) => a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
+export const keysCollide = (a: string, b: string) => a === b || (keyBasename(a) === keyBasename(b) && (isBareKey(a) || isBareKey(b)));
 
 /** True when no fileKey in `a` collides with any in `b`. */
 const disjoint = (a: Set<string>, b: Set<string>) => {

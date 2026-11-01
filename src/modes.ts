@@ -17,6 +17,7 @@ import {
   type MergeConflict,
 } from "./merge.ts";
 import { mergeConflictPrompt, perMergeCheckPrompt } from "./loop.ts";
+import { defaultFileSet, hasFileSetMarker, ticketProse } from "./fileset.ts";
 import {
   UNASKED_PARK_REASONS,
   clearParked,
@@ -1423,6 +1424,21 @@ async function holdCampaignForAnswers(c: CampaignRunContext, members: string[]):
   }
 }
 
+/**
+ * The fileKeys a member's brief declares, for the vetinari-paths check (ADR 0026): its issue fetched
+ * now — a human authorizes a `vetinari/` change by editing the issue, so it is never the plan's
+ * snapshot — and resolved the planner's way, less nothing (`waivedFiles` waive planning collisions,
+ * not this check). Only an explicit marker line declares: with none, the resolver's whole-body
+ * fallback would read prose as cites, so the brief declares nothing.
+ */
+const declaredKeysFor =
+  (cfg: ResolvedConfig) =>
+  async (taskId: string): Promise<string[]> => {
+    const prose = ticketProse(String(await cfg.fetchTask(taskId)));
+    if (!hasFileSetMarker(prose)) return [];
+    return (await (cfg.fileSet ?? defaultFileSet())(prose)).files;
+  };
+
 /** What a wave's integration — its first pass plus any merge-conflict retry — left behind. */
 interface CampaignWaveIntegration {
   merged: string[];
@@ -1448,7 +1464,7 @@ async function integrateCampaignWave(
     reporter.line(`wave ${s.index + 1}/${total}: re-gating — its merges were never gated (the campaign died before its base gate)`);
   const first = stoppedBeforeIntegration
     ? { merged: [], conflicts: [], parked: undefined }
-    : await deps.integrate(cfg, greens, undefined, s.index, { regate });
+    : await deps.integrate(cfg, greens, undefined, s.index, { regate, declaredKeysOf: declaredKeysFor(cfg) });
   let merged = first.merged;
   let alreadyMerged = first.alreadyMerged ?? [];
   let parked = first.parked;
@@ -1497,7 +1513,7 @@ async function retryCampaignConflicts(c: CampaignRunContext, conflicts: MergeCon
     const sid = resumable ? sessions.get(normalize(conflict.taskId)) : undefined;
     if (sid) retrySessions[conflict.taskId] = sid;
     retryPrompts[conflict.taskId] = conflict.gate
-      ? perMergeCheckPrompt(conflict.gate, conflict.detail, conflict.base, cfg.baseBranch)
+      ? perMergeCheckPrompt(conflict.gate, conflict.detail, conflict.base, cfg.baseBranch, conflict.paths)
       : mergeConflictPrompt(conflict.paths, conflict.base, cfg.baseBranch);
   }
   s.draining = true;
@@ -1508,7 +1524,8 @@ async function retryCampaignConflicts(c: CampaignRunContext, conflicts: MergeCon
   s.draining = false;
   await holdCampaignForAnswers(c, retry);
   const retriedGreens = retry.filter((t) => s.outcomes[t] === "green");
-  if (retriedGreens.length && !halted()) return deps.integrate(cfg, retriedGreens, undefined, s.index);
+  if (retriedGreens.length && !halted())
+    return deps.integrate(cfg, retriedGreens, undefined, s.index, { declaredKeysOf: declaredKeysFor(cfg) });
   return undefined;
 }
 

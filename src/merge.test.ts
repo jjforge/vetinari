@@ -17,6 +17,7 @@ import {
   purgeBranches,
   scanTidy,
   type TidySnapshot,
+  VETINARI_PATHS_GATE,
 } from "./merge.ts";
 import { listParkedIn, writeParkedRecord } from "./state.ts";
 import { memoryLogger } from "./log.ts";
@@ -192,6 +193,33 @@ test("parkMergeConflict writes a durable parked{conflict} record and event for a
   assert.deepEqual(
     q.map((e) => (e as any).taskId),
     ["B"],
+  );
+});
+
+test("parkMergeConflict asks a vetinari-paths park to declare the paths on the issue's marker line and redrive, or merge by hand (#607)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-park-paths-"));
+  const parkedDir = join(dir, "parked");
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir,
+    stateDir: join(dir, ".vetinari.local"),
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+
+  parkMergeConflict(cfg, {
+    taskId: "101",
+    paths: ["vetinari/config.mts", "vetinari/Dockerfile"],
+    base: "abc1234",
+    detail: "d",
+    gate: VETINARI_PATHS_GATE,
+  });
+
+  const rec = listParkedIn(parkedDir).find((r) => r.taskId === "101");
+  assert.equal(rec?.reason, "conflict");
+  assert.equal(
+    rec?.question,
+    "Merge of agent/101 changes vetinari/config.mts, vetinari/Dockerfile, which #101's brief doesn't declare — declare them on the issue's marker line and `vetinari redrive`, or merge it by hand.",
   );
 });
 
@@ -799,6 +827,166 @@ test("integrateGreens stops when `git reset --keep` refuses to undo a red-checke
 });
 
 const emptySnapshot = (): TidySnapshot => ({ branches: [], fragments: [], parked: [], conflictParked: [], campaignParked: [] });
+
+// ── the vetinari-paths check (#607) ──
+// A member merge that changes a path under `vetinari/` its brief does not declare is undone and
+// handed back as a failed per-merge check: `vetinari/config.mts` runs on the host.
+
+/**
+ * A fresh repo on `main` seeded with `vetinari/config.mts`, `vetinari/x.mts` and `src/a.ts`; branch
+ * `agent/101` is cut from the seed and `change` applies its edit there (it commits).
+ */
+function repoWithVetinariGreen(change: (dir: string, git: (args: string[]) => string) => void): {
+  dir: string;
+  git: (args: string[]) => string;
+} {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-paths-"));
+  const git = (args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" }).trim();
+  execFileSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "init", "-q"]);
+  git(["config", "user.email", "test@example.com"]);
+  git(["config", "user.name", "test"]);
+  mkdirSync(join(dir, "vetinari"));
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "vetinari", "config.mts"), "export default {};\n");
+  writeFileSync(join(dir, "vetinari", "x.mts"), "export const x = 1;\n");
+  writeFileSync(join(dir, "src", "a.ts"), "base\n");
+  git(["add", "-A"]);
+  git(["commit", "-qm", "seed"]);
+  git(["checkout", "-q", "-b", "agent/101"]);
+  change(dir, git);
+  git(["add", "-A"]);
+  git(["commit", "-qm", "101"]);
+  git(["checkout", "-q", "main"]);
+  return { dir, git };
+}
+
+const editsConfig = (dir: string) => writeFileSync(join(dir, "vetinari", "config.mts"), "export default { evil: true };\n");
+
+/** Run `integrateGreens` over `["101"]` in `dir` with a green base gate and the given declared keys. */
+async function integrateWithDeclared(dir: string, declaredKeysOf?: (id: string) => Promise<string[]>) {
+  const log = memoryLogger();
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    log,
+  } as unknown as ResolvedConfig;
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(cfg, ["101"], { gate: async () => ({ green: true, report: "" }) }, undefined, { declaredKeysOf });
+    return { result, log };
+  } finally {
+    process.chdir(prevCwd);
+  }
+}
+
+test("integrateGreens undoes a merge that changes an undeclared vetinari/ path and reports it as a vetinari-paths check failure (#607)", async () => {
+  const { dir, git } = repoWithVetinariGreen(editsConfig);
+  const before = headSha(dir);
+  const { result, log } = await integrateWithDeclared(dir, async () => ["src/a.ts"]);
+
+  assert.equal(headSha(dir), before, "the merge was undone");
+  assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "export default {};\n");
+  assert.deepEqual(result.merged, []);
+  assert.equal(result.conflicts.length, 1);
+  const [c] = result.conflicts;
+  assert.equal(c.taskId, "101");
+  assert.equal(c.gate, VETINARI_PATHS_GATE);
+  assert.equal(VETINARI_PATHS_GATE, "vetinari-paths");
+  assert.deepEqual(c.paths, ["vetinari/config.mts"]);
+  assert.match(c.detail, /vetinari\/config\.mts/);
+  assert.equal(git(["branch", "--list", "agent/101"]).length > 0, true, "the branch is kept for the retry");
+  assert.deepEqual(
+    log.events.filter((e) => e.event === "merged"),
+    [],
+  );
+});
+
+for (const key of ["vetinari/config.mts", "*/config.mts"]) {
+  test(`integrateGreens merges a vetinari/ change its brief declares — key ${key} (#607)`, async () => {
+    const { dir } = repoWithVetinariGreen(editsConfig);
+    const { result, log } = await integrateWithDeclared(dir, async () => [key]);
+    assert.deepEqual(result.merged, ["101"]);
+    assert.deepEqual(result.conflicts, []);
+    assert.equal(readFileSync(join(dir, "vetinari", "config.mts"), "utf8"), "export default { evil: true };\n");
+    assert.deepEqual(
+      log.events.filter((e) => e.event === "merged").map((e) => (e as any).taskId),
+      ["101"],
+    );
+  });
+}
+
+test("integrateGreens leaves a change outside vetinari/ unchecked — an undeclared src/ file merges, and the brief is never read (#607)", async () => {
+  const { dir } = repoWithVetinariGreen((d) => writeFileSync(join(d, "src", "b.ts"), "new\n"));
+  const asked: string[] = [];
+  const { result } = await integrateWithDeclared(dir, async (id) => {
+    asked.push(id);
+    return [];
+  });
+  assert.deepEqual(result.merged, ["101"]);
+  assert.deepEqual(result.conflicts, []);
+  assert.deepEqual(asked, [], "declaredKeysOf is only called for a merge that changes a vetinari/ path");
+});
+
+test("integrateGreens catches a move out of vetinari/ by its vetinari/ side (#607)", async () => {
+  const { dir } = repoWithVetinariGreen((_d, git) => git(["mv", "vetinari/x.mts", "src/x.mts"]));
+  const { result } = await integrateWithDeclared(dir, async () => ["src/x.mts"]);
+  assert.deepEqual(result.merged, []);
+  assert.deepEqual(
+    result.conflicts.map((c) => ({ gate: c.gate, paths: c.paths })),
+    [{ gate: VETINARI_PATHS_GATE, paths: ["vetinari/x.mts"] }],
+  );
+  assert.equal(existsSync(join(dir, "vetinari", "x.mts")), true, "the move was undone");
+});
+
+test("integrateGreens with no declaredKeysOf treats a vetinari/ change as undeclared (#607)", async () => {
+  const { dir } = repoWithVetinariGreen(editsConfig);
+  const { result } = await integrateWithDeclared(dir);
+  assert.deepEqual(result.merged, []);
+  assert.equal(result.conflicts[0]?.gate, VETINARI_PATHS_GATE);
+});
+
+test("integrateGreens runs no perMerge gate on a merge the vetinari-paths check undid, and undoes it once (#607)", async () => {
+  const { dir } = repoWithVetinariGreen(editsConfig);
+  const before = headSha(dir);
+  const lint = { cmd: "make lint", label: "lint", perMerge: true };
+  const cfg = {
+    branchPrefix: "agent/",
+    baseBranch: "main",
+    parkedDir: join(dir, "parked"),
+    stateDir: join(dir, ".vetinari.local"),
+    gates: [lint],
+    log: memoryLogger(),
+  } as unknown as ResolvedConfig;
+  const calls: GateSpec[][] = [];
+  const prevCwd = process.cwd();
+  process.chdir(dir);
+  try {
+    const result = await integrateGreens(
+      cfg,
+      ["101"],
+      {
+        gate: async () => ({ green: true, report: "" }),
+        perMergeGate: async (_c, flagged) => {
+          calls.push(flagged);
+          return { green: false, report: "red", failed: flagged[0] };
+        },
+      },
+      undefined,
+      { declaredKeysOf: async () => [] },
+    );
+    assert.deepEqual(calls, []);
+    assert.deepEqual(
+      result.conflicts.map((c) => c.gate),
+      [VETINARI_PATHS_GATE],
+    );
+    assert.equal(headSha(dir), before);
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
 
 test("computeTidy deletes a reachable branch and folds its fragment, keeps an unmerged one", () => {
   const plan = computeTidy({

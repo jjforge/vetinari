@@ -13,6 +13,7 @@ import { reduceCampaign } from "./campaign-fold.ts";
 import type { PointerDrop } from "./registry.ts";
 import { normalize } from "./issue-id.ts";
 import { gitRead } from "./git-read.ts";
+import { keysCollide } from "./plan.ts";
 
 /** Run a read-only git command in the host project root, throwing its stderr on a non-zero exit. */
 const git = (args: string[]) => gitRead(args).trim();
@@ -100,7 +101,10 @@ export function findMergeCommit(cfg: { baseBranch: string; branchPrefix: string 
  */
 export interface MergeConflict {
   taskId: string;
-  /** the paths git left unmerged — what the retry's prompt names. Empty for a failed check. */
+  /**
+   * the paths git left unmerged — what the retry's prompt names. For a failed check: the undeclared
+   * `vetinari/` paths of a {@link VETINARI_PATHS_GATE} failure, else empty.
+   */
   paths: string[];
   /** the base commit the retry merges into its branch: HEAD once this pass's merges have landed. */
   base: string;
@@ -160,12 +164,29 @@ export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict):
     reason: "conflict",
     detail: conflict.detail,
     branch,
-    question: conflict.gate
-      ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then \`vetinari redrive\`.`
-      : `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
+    question:
+      conflict.gate === VETINARI_PATHS_GATE
+        ? `Merge of ${branch} changes ${conflict.paths.join(", ")}, which #${conflict.taskId}'s brief doesn't declare — declare them on the issue's marker line and \`vetinari redrive\`, or merge it by hand.`
+        : conflict.gate
+          ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then \`vetinari redrive\`.`
+          : `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
   });
   cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });
 }
+
+/**
+ * The `gate` label of the built-in per-merge check that undoes a member merge changing a path under
+ * `vetinari/` its brief does not declare (ADR 0026): `vetinari/config.mts` is imported on the host by
+ * every later CLI process, so only a human-written brief may authorize a change there.
+ */
+export const VETINARI_PATHS_GATE = "vetinari-paths";
+
+/**
+ * The paths under `vetinari/` that `changed` holds and no key in `declared` matches, matched the way
+ * the planner matches fileKeys (`keysCollide`: an exact path, or a bare `*\/` key of that name).
+ */
+const undeclaredVetinariPaths = (changed: string[], declared: string[]): string[] =>
+  changed.filter((p) => p.startsWith("vetinari/") && !declared.some((k) => keysCollide(k, p)));
 
 /**
  * The merged-base gate and the per-merge check, injected so `integrateGreens`'s merge/conflict
@@ -210,6 +231,11 @@ const defaultIntegrateDeps: IntegrateDeps = { gate: gateMergedBase, perMergeGate
  * logged only after a green check. A green already on the base gets no check and no undo (its
  * merge may no longer be the newest commit); with a flagged gate it forces the merged-base gate.
  *
+ * The **vetinari-paths check** (ADR 0026) runs first on each merge that succeeds: a merge that
+ * changes a path under `vetinari/` that `opts.declaredKeysOf` does not declare is undone the same
+ * way and returned in `conflicts` with gate {@link VETINARI_PATHS_GATE} and the undeclared paths;
+ * the `perMerge` gates do not run on it.
+ *
  * A **red merged base** has no single culprit, so it is NOT rolled back either: the
  * greens stay merged, the branches are left intact, and the result carries `parked` so
  * the caller wave-parks — a resumable pause for a human to fix forward or prune a
@@ -227,7 +253,14 @@ export async function integrateGreens(
   greens: string[],
   deps: IntegrateDeps = defaultIntegrateDeps,
   index?: number,
-  opts: { regate?: boolean } = {},
+  opts: {
+    regate?: boolean;
+    /**
+     * The fileKeys a member's brief declares, read from its live issue (ADR 0026). Called only for
+     * a merge that changes a `vetinari/` path; absent, a ticket declares nothing.
+     */
+    declaredKeysOf?: (taskId: string) => Promise<string[]>;
+  } = {},
 ): Promise<IntegrateResult> {
   const merged: string[] = [];
   const alreadyMerged: string[] = [];
@@ -269,14 +302,23 @@ export async function integrateGreens(
       }
       continue;
     }
+    // The vetinari-paths check (ADR 0026): a change under `vetinari/` runs on the host at the next
+    // CLI start, so it merges only when the brief declares it. `--no-renames` so a move out of
+    // `vetinari/` still shows its `vetinari/` side. Undone like a red per-merge check, below.
+    const changed = git(["diff", "--name-only", "--no-renames", preMerge, "HEAD"]).split("\n").filter(Boolean);
+    if (changed.some((p) => p.startsWith("vetinari/"))) {
+      const undeclared = undeclaredVetinariPaths(changed, (await opts.declaredKeysOf?.(taskId)) ?? []);
+      if (undeclared.length) {
+        undoMerge(branch, preMerge);
+        const detail = `${branch} changes ${undeclared.join(", ")} under vetinari/, which #${taskId}'s brief does not declare.`;
+        collided.push({ taskId, paths: undeclared, gate: VETINARI_PATHS_GATE, detail });
+        continue;
+      }
+    }
     if (flagged.length) {
       const check = await perMergeGate(cfg, flagged);
       if (!check.green) {
-        // Attributable to this member: undo ONLY its merge — the newest commit, so this never
-        // resets past it. `--keep`, never `--hard`: integration runs in the operator's checkout,
-        // and `--keep` keeps unrelated local edits (refusing rather than clobbering them).
-        const undo = gitTry(["reset", "--keep", preMerge]);
-        if (undo.code !== 0) throw new Error(`could not undo the merge of ${branch}: ${undo.stderr.trim()}`);
+        undoMerge(branch, preMerge);
         const failed = check.failed ?? flagged[0];
         collided.push({ taskId, paths: [], gate: failed.label ?? failed.cmd, detail: check.report.split("\n").slice(-40).join("\n") });
         continue;
@@ -322,6 +364,16 @@ export async function integrateGreens(
   gitTry(["worktree", "prune"]);
   cfg.log.log("campaign-integrated", { merged, headSha: git(["rev-parse", "HEAD"]) });
   return { merged, alreadyMerged, conflicts, mergeFailed };
+}
+
+/**
+ * Undo one member's merge, attributable to it: ONLY its merge — the newest commit, so this never
+ * resets past it. `--keep`, never `--hard`: integration runs in the operator's checkout, and
+ * `--keep` keeps unrelated local edits (refusing rather than clobbering them — which throws).
+ */
+function undoMerge(branch: string, preMerge: string): void {
+  const undo = gitTry(["reset", "--keep", preMerge]);
+  if (undo.code !== 0) throw new Error(`could not undo the merge of ${branch}: ${undo.stderr.trim()}`);
 }
 
 /**

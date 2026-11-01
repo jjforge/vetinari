@@ -478,6 +478,14 @@ export const defaultFileSet = (root: string = process.cwd()): ((ticket: string) 
 };
 
 /**
+ * True when `ticket` carries an explicit `Touches:`/`Files:` or `Creates:` marker line — the test
+ * the resolver uses to choose the marker lines' cites over its whole-body fallback. Only a marker
+ * line declares the `vetinari/` paths a member may change (ADR 0026), never prose.
+ */
+export const hasFileSetMarker = (ticket: string): boolean =>
+  markerTail(ticket, TOUCHES_RE) !== null || markerTail(ticket, CREATES_RE) !== null;
+
+/**
  * A ticket's cites, split by how they resolve: `touches` name files the tree must hold,
  * `creates` new files. With a marker line of either kind only the marker lines' cites
  * count; with none, every cite in the whole body is a `touches` cite (the all-or-nothing

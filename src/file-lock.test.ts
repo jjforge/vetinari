@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { RECLAIM_GUARD_STALE_MS, withFileLockAsync, withFileLockSync } from "./file-lock.ts";
+import { awaitReadyBarrier } from "./spawn-barrier.test-support.ts";
 
 const freshLock = () => join(mkdtempSync(join(tmpdir(), "vetinari-file-lock-")), "test.lock");
 const opts = { retryMs: 1, maxAttempts: 5, label: "test" };
@@ -205,15 +206,18 @@ test("several processes contending one lock, seeded with a dead holder's lock, n
   writeFileSync(lock, `${deadPid}:crashed`);
 
   const N = 5;
-  const children = Array.from({ length: N }, () => {
-    const child = spawn(TSX, [script, dir, lock], { stdio: ["ignore", "ignore", "pipe"] });
+  const children = Array.from({ length: N }, () => spawn(TSX, [script, dir, lock], { stdio: ["ignore", "ignore", "pipe"] }));
+  const exits = children.map((child) => {
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));
-    return new Promise<{ code: number | null; stderr: string }>((resolve) => child.on("exit", (code) => resolve({ code, stderr })));
+    // `close`, not `exit`: by then the child's stderr is fully read.
+    return new Promise<{ code: number | null; stderr: string }>((resolve) => child.on("close", (code) => resolve({ code, stderr })));
   });
-  while (readdirSync(dir).filter((f) => f.startsWith("ready.")).length < N) await new Promise((r) => setTimeout(r, 10));
-  writeFileSync(join(dir, "go"), "");
+  await awaitReadyBarrier(dir, children).catch(async (e: Error) => {
+    // A child died before ready: the barrier stopped the rest, so every stderr is complete.
+    assert.fail(`${e.message}\n${(await Promise.all(exits)).map((x) => x.stderr).join("")}`);
+  });
 
-  for (const { code, stderr } of await Promise.all(children)) assert.equal(code, 0, stderr);
+  for (const { code, stderr } of await Promise.all(exits)) assert.equal(code, 0, stderr);
   assert.equal(existsSync(lock), false);
 });

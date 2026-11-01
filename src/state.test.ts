@@ -28,6 +28,7 @@ import {
 import { memoryLogger } from "./log.ts";
 import { Refusal } from "./refusal.ts";
 import { withEnv } from "./test-support.ts";
+import { awaitReadyBarrier } from "./spawn-barrier.test-support.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
   ({
@@ -662,17 +663,18 @@ test("concurrent stamps and answers from separate processes both land on the rec
       `}`,
     ].join("\n"),
   );
-  const run = (role: string) =>
-    new Promise<number | null>((resolve, reject) => {
-      const child = spawn(TSX, [script, role, parkedDir, dir], { stdio: ["ignore", "ignore", "inherit"] });
-      child.on("error", reject);
-      child.on("exit", resolve);
-    });
-
   const roles = ["stamp", "answer", "stamp", "answer", "stamp", "answer"];
-  const exits = Promise.all(roles.map(run));
-  while (readdirSync(dir).filter((f) => f.startsWith("ready.")).length < roles.length) await new Promise((r) => setTimeout(r, 10));
-  writeFileSync(join(dir, "go"), "");
+  const children = roles.map((role) => spawn(TSX, [script, role, parkedDir, dir], { stdio: ["ignore", "ignore", "inherit"] }));
+  const exits = Promise.all(
+    children.map(
+      (child) =>
+        new Promise<number | null>((resolve, reject) => {
+          child.on("error", reject);
+          child.on("exit", resolve);
+        }),
+    ),
+  );
+  await awaitReadyBarrier(dir, children);
   const codes = await exits;
 
   assert.deepEqual(codes, [0, 0, 0, 0, 0, 0], "every writer exits zero");

@@ -916,6 +916,70 @@ test("scenario 2b: an answer delivered mid-wave (the grace window) re-admits the
   });
 });
 
+// An answer that lands after the wave has drained — during its integration pass — is re-checked
+// before the campaign parks, whatever `parkGraceSeconds` is (#683): the member re-runs with it and
+// merges on one more integration pass in the same wave.
+for (const graceSeconds of [0, 30]) {
+  test(`scenario 2c (parkGraceSeconds ${graceSeconds}): an answer that lands during integration${graceSeconds ? ", after the grace window" : ""} re-admits the member into the SAME wave, and the campaign finishes done with no park (#683)`, async () => {
+    const dir = seedRepo();
+    const tracker = fakeTracker();
+    const cfg = repoCfg(dir, tracker, { parkGraceSeconds: graceSeconds });
+    // 101 implements green; 102 parks until answered.
+    const scriptFor = (id: string) => (id === "102" ? answerGatedScript(id) : implScript(id));
+
+    await inRepo(dir, async () => {
+      const base = localCampaignDeps(cfg, dir, scriptFor);
+      let answered = false;
+      const deps: CampaignDeps = {
+        ...base,
+        // The grace window (if any) expires with no answer. The human's answer lands while the first
+        // integration pass runs — after the drain and any window — DELIVERED into 102's parked
+        // record, as `answer` does under a live campaign.
+        integrate: async (c, greens, d, index, o) => {
+          const result = await base.integrate(c, greens, d, index, o);
+          if (!answered) answered = answerParked(c, "102", "use approach A");
+          return result;
+        },
+      };
+      const ok = await campaign(cfg, [["101", "102"]], host(dir), "rejoin-after-drain", {}, deps);
+      assert.ok(answered, "the answer was delivered into 102's parked record");
+      assert.equal(ok, "done", "the late answer let the member rejoin and the wave finish");
+
+      assert.equal(gitOut(dir, ["show", "base:impl-101.txt"]), "impl for 101");
+      assert.equal(gitOut(dir, ["show", "base:impl-102.txt"]), "impl for 102");
+      const events = readEventLog(cfg);
+      assert.equal(
+        events.some((e) => e.event === "grace-wait"),
+        graceSeconds > 0,
+        "the window ran first only when one is configured",
+      );
+      assert.deepEqual(
+        events.filter((e) => e.event === "merged").map((e: any) => e.taskId),
+        ["101", "102"],
+        "102 merged on a second integration pass in the same wave",
+      );
+      assert.ok(
+        events.some((e) => e.event === "wave-done"),
+        "the wave closed with both members merged",
+      );
+      assert.ok(
+        events.some((e) => e.event === "campaign-done"),
+        "the campaign finished",
+      );
+      assert.equal(
+        events.some((e) => e.event === "campaign-parked"),
+        false,
+        "the answered member never parked the wave",
+      );
+      assert.equal(
+        listParked(cfg).some((r) => r.taskId === "102"),
+        false,
+        "the answered record was consumed by the re-run",
+      );
+    });
+  });
+}
+
 test("scenario 1: two all-green waves merge in order, the base is gated between them, and the campaign finishes done", async () => {
   const dir = seedRepo();
   const tracker = fakeTracker();

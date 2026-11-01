@@ -1481,7 +1481,7 @@ const declaredKeysFor =
     return defaultFileSet()(prose).files;
   };
 
-/** What a wave's integration — its first pass plus any merge-conflict retry — left behind. */
+/** What a wave's integration — its first pass plus any merge-conflict retry or late-answer pass — left behind. */
 interface CampaignWaveIntegration {
   merged: string[];
   alreadyMerged: string[];
@@ -1490,7 +1490,10 @@ interface CampaignWaveIntegration {
   conflictParked: string[];
 }
 
-/** Integrate wave `s.index`'s greens into the base, retrying each merge collision once (design §6). */
+/**
+ * Integrate wave `s.index`'s greens into the base, retrying each merge collision once (design §6),
+ * then re-admitting any parked member answered since the drain (design §5 step 3).
+ */
 async function integrateCampaignWave(
   c: CampaignRunContext,
   tasks: string[],
@@ -1513,22 +1516,26 @@ async function integrateCampaignWave(
   const mergeFailed = [...(first.mergeFailed ?? [])];
   const conflictParked: string[] = [];
 
+  // A later integration pass folds into the wave's result; its collisions park `conflict` (design §6).
+  const fold = (pass: IntegrateResult | undefined) => {
+    if (!pass) return;
+    merged = [...merged, ...pass.merged];
+    alreadyMerged = [...alreadyMerged, ...(pass.alreadyMerged ?? [])];
+    mergeFailed.push(...(pass.mergeFailed ?? []));
+    parked = pass.parked;
+    for (const conflict of pass.conflicts) {
+      parkMergeConflict(cfg, conflict);
+      conflictParked.push(conflict.taskId);
+    }
+  };
   // A merge collision is retried once by the issue's own agent before it parks (design §6). Only
   // on a base the first pass left green — a red base outranks it and parks the wave below — and
   // never once a `--now` stop has landed.
-  if (first.conflicts.length && !parked && !halted()) {
-    const second = await retryCampaignConflicts(c, first.conflicts);
-    if (second) {
-      merged = [...merged, ...second.merged];
-      alreadyMerged = [...alreadyMerged, ...(second.alreadyMerged ?? [])];
-      mergeFailed.push(...(second.mergeFailed ?? []));
-      parked = second.parked;
-      for (const conflict of second.conflicts) {
-        parkMergeConflict(cfg, conflict);
-        conflictParked.push(conflict.taskId);
-      }
-    }
-  }
+  if (first.conflicts.length && !parked && !halted()) fold(await retryCampaignConflicts(c, first.conflicts));
+  // An answer that landed after the drain — past any grace window, during integration — gets one
+  // last re-check before the wave can park on it, whatever `parkGraceSeconds` is (design §5 step 3).
+  // Only on a green base, and never once any stop is pending.
+  if (!parked && !s.stop) fold(await readmitLateAnswers(c, tasks));
   // A merge that failed with no unmerged paths is a failed member (design §6): `integrateGreens`
   // logged its `failed`, and its wave resolves as for any failed member below.
   for (const t of mergeFailed) s.outcomes[t] = "error(merge failed)";
@@ -1568,6 +1575,30 @@ async function retryCampaignConflicts(c: CampaignRunContext, conflicts: MergeCon
   const retriedGreens = retry.filter((t) => s.outcomes[t] === "green");
   if (retriedGreens.length && !halted())
     return deps.integrate(cfg, retriedGreens, undefined, s.index, { declaredKeysOf: declaredKeysFor(cfg) });
+  return undefined;
+}
+
+/**
+ * The final re-check before a wave parks on its parked members (design §5 step 3): each one whose
+ * record has since been answered re-runs with its answer in this wave, and its green goes through
+ * one more integration pass — returned here, as `retryCampaignConflicts` returns its own. A member
+ * answered after this check is left to `answer`'s own path, so nothing loops.
+ */
+async function readmitLateAnswers(c: CampaignRunContext, tasks: string[]): Promise<IntegrateResult | undefined> {
+  const { cfg, host, deps, reporter, halted, s } = c;
+  // An `outdated-agent` member (#444) has nothing to answer.
+  const outdatedAgentIds = new Set(
+    listParked(cfg)
+      .filter((r) => r.reason === "outdated-agent")
+      .map((r) => normalize(r.taskId)),
+  );
+  const answered = tasks.filter((t) => s.outcomes[t] === "parked" && !outdatedAgentIds.has(normalize(t)) && isAnswered(cfg, t));
+  if (!answered.length) return undefined;
+  s.draining = true;
+  s.outcomes = { ...s.outcomes, ...(await queue(cfg, answered, host, s.titles, deps.spawnRun, reporter, {}, halted)) };
+  s.draining = false;
+  const greens = answered.filter((t) => s.outcomes[t] === "green");
+  if (greens.length && !halted()) return deps.integrate(cfg, greens, undefined, s.index, { declaredKeysOf: declaredKeysFor(cfg) });
   return undefined;
 }
 

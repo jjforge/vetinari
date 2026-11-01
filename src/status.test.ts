@@ -2331,3 +2331,48 @@ test("serveAllStatus admits every request when the Docker lister throws or hangs
     }
   }
 });
+
+test("serveAllStatus re-lists the Docker subnets on its refresh interval, warns once per failure streak, and stops listing once closed (#603)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-docker-peer-refresh-"));
+  const logger = memoryLogger();
+  let answer: () => Promise<string[]> = async () => [];
+  let calls = 0;
+  const dockerPeerSubnets = () => {
+    calls++;
+    return answer();
+  };
+  const server = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1", logger, dockerPeerSubnets, dockerPeerRefreshMs: 10 });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const statusOf = async () => {
+    const res = await fetch(`${base}/api/landing`);
+    await res.text();
+    return res.status;
+  };
+  // Wait until `n` more listings have run since now.
+  const refreshes = async (n: number) => {
+    const target = calls + n;
+    for (let i = 0; i < 200 && calls < target; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.ok(calls >= target, `${n} more refreshes ran`);
+  };
+  const warnings = () => logger.events.filter((e) => (e.event as string) === "dashboard-docker-peers-unavailable").length;
+  try {
+    assert.equal(await statusOf(), 200);
+    answer = async () => ["127.0.0.0/8"];
+    await refreshes(2);
+    assert.equal(await statusOf(), 403, "the next refresh covers the new subnet");
+    answer = async () => Promise.reject(new Error("daemon down"));
+    await refreshes(3);
+    assert.equal(await statusOf(), 200, "a failed listing filters nothing");
+    assert.equal(warnings(), 1, "one warning for the whole failure streak");
+    answer = async () => [];
+    await refreshes(2);
+    answer = async () => Promise.reject(new Error("daemon down"));
+    await refreshes(2);
+    assert.equal(warnings(), 2, "a new streak warns again");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+  const closedAt = calls;
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(calls, closedAt, "no listing runs once the server is closed");
+});

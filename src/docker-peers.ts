@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { BlockList, isIP } from "node:net";
 import type { Logger } from "./log.ts";
 
@@ -27,6 +28,28 @@ export function dockerPeerDenial(remoteAddress: string | undefined, subnets: str
 /** Lists the CIDR subnets whose peers are refused; rejects when they cannot be listed. */
 export type DockerSubnetLister = () => Promise<string[]>;
 
+/**
+ * The Docker networks agent containers run on: only the default `bridge`, since vetinari never
+ * passes a `network` to sandcastle. A user-defined network — an operator's authenticating reverse
+ * proxy or a sidecar — is deliberately not refused (ADR 0021). Give sandcastle a network, add it here.
+ */
+export const AGENT_CONTAINER_NETWORKS = ["bridge"];
+
+/**
+ * The subnets (IPv4 and IPv6) of `AGENT_CONTAINER_NETWORKS`, by `docker network inspect`. Rejects
+ * when they cannot be listed — no `docker` on PATH, daemon down, a failed or timed-out command — so
+ * the watcher filters nothing and proceeds, as `readMountParentOwners` does.
+ */
+export function listDockerBridgeSubnets(docker = "docker", timeoutMs = 5_000): Promise<string[]> {
+  const args = ["network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", ...AGENT_CONTAINER_NETWORKS];
+  return new Promise((resolve, reject) => {
+    execFile(docker, args, { encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL" }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout.split(/\s+/).filter(Boolean));
+    });
+  });
+}
+
 /** The latest listed subnets, kept fresh until `stop`. */
 export interface DockerPeerWatch {
   subnets(): string[];
@@ -47,21 +70,44 @@ async function listWithin(list: DockerSubnetLister, timeoutMs: number): Promise<
 }
 
 /**
- * Take the first listing — awaited, so no request is served unchecked — and keep its result. A
- * listing that fails or times out filters nothing (the dashboard keeps working), logging one
- * `dashboard-docker-peers-unavailable` warning.
+ * Take the first listing — awaited, so no request is served unchecked — then re-list every
+ * `intervalMs` on an `unref`'d timer that `stop` clears; a request never waits on a refresh, it
+ * reads the latest list. A listing that fails or times out filters nothing (the dashboard keeps
+ * working), logging one `dashboard-docker-peers-unavailable` warning per failure streak.
  */
 export async function watchDockerPeerSubnets(
   list: DockerSubnetLister,
-  opts: { timeoutMs: number; logger: Pick<Logger, "log"> },
+  opts: { intervalMs: number; timeoutMs: number; logger: Pick<Logger, "log"> },
 ): Promise<DockerPeerWatch> {
   let current: string[] = [];
-  try {
-    current = await listWithin(list, opts.timeoutMs);
-  } catch (err) {
+  let failing = false;
+  let stopped = false;
+  let timer: NodeJS.Timeout | undefined;
+  const refresh = async () => {
     try {
-      opts.logger.log("dashboard-docker-peers-unavailable", { error: String(err) });
-    } catch {}
-  }
-  return { subnets: () => current, stop: () => {} };
+      current = await listWithin(list, opts.timeoutMs);
+      failing = false;
+    } catch (err) {
+      current = [];
+      if (!failing) {
+        try {
+          opts.logger.log("dashboard-docker-peers-unavailable", { error: String(err) });
+        } catch {}
+      }
+      failing = true;
+    }
+  };
+  const schedule = () => {
+    if (stopped) return;
+    timer = setTimeout(() => void refresh().then(schedule), opts.intervalMs).unref();
+  };
+  await refresh();
+  schedule();
+  return {
+    subnets: () => current,
+    stop: () => {
+      stopped = true;
+      clearTimeout(timer);
+    },
+  };
 }

@@ -121,6 +121,8 @@ export async function serveAllStatus(
     dockerPeerSubnets?: DockerSubnetLister;
     /** How long one listing may take before it counts as failed; defaults to 5 s. */
     dockerPeerTimeoutMs?: number;
+    /** How often the subnets are re-listed; defaults to 60 s. */
+    dockerPeerRefreshMs?: number;
   },
 ) {
   const deps: DashboardDeps = {
@@ -140,10 +142,13 @@ export async function serveAllStatus(
     .filter(Boolean);
   const logger = opts.logger ?? hostLogger();
   const handlers = opts.routes ?? routes;
-  const peers = await watchDockerPeerSubnets(opts.dockerPeerSubnets ?? (async () => []), {
-    timeoutMs: opts.dockerPeerTimeoutMs ?? 5_000,
-    logger,
-  });
+  const peers = opts.dockerPeerSubnets
+    ? await watchDockerPeerSubnets(opts.dockerPeerSubnets, {
+        intervalMs: opts.dockerPeerRefreshMs ?? 60_000,
+        timeoutMs: opts.dockerPeerTimeoutMs ?? 5_000,
+        logger,
+      })
+    : undefined;
   const server = createServer((req, res) => {
     const path = URL.parse(req.url ?? "/", "http://localhost")?.pathname ?? null;
     // One access row per POST — every one starts a process or reshapes a campaign — written once
@@ -173,7 +178,7 @@ export async function serveAllStatus(
       // First, before the Host check: an agent container is a script that can forge Host and Origin,
       // but not the address it connects from — and a forged DNS-name Host still gets this row (#603).
       const remote = req.socket.remoteAddress;
-      const peerDenial = dockerPeerDenial(remote, peers.subnets());
+      const peerDenial = dockerPeerDenial(remote, peers?.subnets() ?? []);
       if (peerDenial) {
         try {
           logger.log("dashboard-docker-peer-refused", { method: req.method, path, remote });
@@ -217,6 +222,7 @@ export async function serveAllStatus(
       } catch {}
     });
   });
+  if (peers) server.on("close", peers.stop);
   await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
   const address = server.address() as AddressInfo;
   const shownHost = opts.host === "0.0.0.0" ? "<tailnet-or-host-ip>" : opts.host;

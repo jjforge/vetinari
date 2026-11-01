@@ -1990,6 +1990,37 @@ test("serveAllStatus refuses GET /api/status under a rebound DNS-name Host with 
   }
 });
 
+test("serveAllStatus serves GET /api/v1/projects under a loopback Host, and refuses it under a rebound DNS-name Host and from a Docker-peer subnet with 403 (#493)", async () => {
+  const configDir = mkdtempSync(join(tmpdir(), "vetinari-api-v1-guard-"));
+  const open = await serveAllStatus(configDir, { port: 0, host: "127.0.0.1" });
+  const peered = await serveAllStatus(configDir, {
+    port: 0,
+    host: "127.0.0.1",
+    logger: memoryLogger(),
+    dockerPeerSubnets: async () => ["127.0.0.0/8"],
+  });
+  // `fetch` silently replaces a caller-set Host, so each request goes out by node:http.
+  const statusUnder = (port: number, host: string) =>
+    new Promise<number>((resolve, reject) => {
+      request({ host: "127.0.0.1", port, path: "/api/v1/projects", headers: { host } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      })
+        .on("error", reject)
+        .end();
+    });
+  try {
+    const openPort = (open.address() as AddressInfo).port;
+    const peeredPort = (peered.address() as AddressInfo).port;
+    assert.equal(await statusUnder(openPort, `127.0.0.1:${openPort}`), 200);
+    assert.equal(await statusUnder(openPort, `evil.example:${openPort}`), 403);
+    assert.equal(await statusUnder(peeredPort, `127.0.0.1:${peeredPort}`), 403);
+  } finally {
+    await new Promise<void>((resolve) => open.close(() => resolve()));
+    await new Promise<void>((resolve) => peered.close(() => resolve()));
+  }
+});
+
 test("serveAllStatus warns, after its URL line, that a non-loopback bind is unauthenticated; a loopback bind prints no warning (#361)", async (t) => {
   const configDir = join(tmpdir(), `vetinari-agg-bind-${Date.now()}`);
   const log = t.mock.method(console, "log", () => {});

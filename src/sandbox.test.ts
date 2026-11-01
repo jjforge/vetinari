@@ -16,7 +16,8 @@ import {
   readMountParentOwners,
   sandboxMounts,
 } from "./sandbox.ts";
-import type { ResolvedConfig } from "./config.ts";
+import type { MountSpec, ResolvedConfig } from "./config.ts";
+import type { SandboxProvider } from "@ai-hero/sandcastle";
 import { withEnv } from "./test-support.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
@@ -146,6 +147,33 @@ test("makeSandboxOptions forks agent/<id> from cfg.baseBranch, not the checked-o
   // baseBranch is the fork point sandcastle uses only for a NEW branch (ignored on reuse),
   // so a fresh agent/436 follows `release` regardless of what is currently checked out.
   assert.equal(opts.baseBranch, "release");
+});
+
+test("with no sandbox factory configured, makeSandboxOptions uses the Docker provider", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-state-"));
+  mkdirSync(join(stateDir, "worktrees"));
+  assert.equal(makeSandboxOptions(sandboxCfg({ stateDir }), "436").sandbox.name, "docker");
+});
+
+test("a configured sandbox factory builds the provider, given the config and this run's mounts", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-state-"));
+  const fake = { name: "fake", env: {} } as unknown as SandboxProvider;
+  const calls: [ResolvedConfig, { mounts: MountSpec[] }][] = [];
+  const sandbox = (cfg: ResolvedConfig, ctx: { mounts: MountSpec[] }) => (calls.push([cfg, ctx]), fake);
+  const cfg = sandboxCfg({ stateDir, agent: { provider: "copilot" }, sandbox });
+  withAgentEnv(undefined, () => {
+    // An agent run of a copilot provider: its Copilot mount reaches the factory.
+    assert.equal(makeSandboxOptions(cfg, "42", "42").sandbox, fake);
+    // A gate or baseline sandbox names no issue, so no Copilot mount.
+    assert.equal(makeSandboxOptions(cfg, "42").sandbox, fake);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0][0], cfg);
+    assert.deepEqual(calls[0][1], { mounts: sandboxMounts(cfg, process.cwd(), "42") });
+    assert.ok(calls[0][1].mounts.some((m) => m.sandboxPath === "/home/agent/.copilot"));
+    assert.equal(calls[1][0], cfg);
+    assert.deepEqual(calls[1][1], { mounts: sandboxMounts(cfg, process.cwd()) });
+    assert.ok(!calls[1][1].mounts.some((m) => m.sandboxPath === "/home/agent/.copilot"));
+  });
 });
 
 test("sandboxMounts appends the host worktrees dir, read-only at its own host path, so an in-container prune sees live worktrees", () => {

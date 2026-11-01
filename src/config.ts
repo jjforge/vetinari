@@ -2,6 +2,7 @@ import { basename, dirname, resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { registerHooks } from "node:module";
+import type { SandboxProvider } from "@ai-hero/sandcastle";
 import type { FindingReporter, Severity } from "./findings.ts";
 import type { FileSetOf } from "./fileset.ts";
 import { loggerForRun, type Logger } from "./log.ts";
@@ -459,8 +460,18 @@ export interface MountSpec {
 export interface VetinariConfig {
   /** Name used in notifications, e.g. "jjforge". */
   project: string;
-  /** Docker image carrying your toolchain AND the agent CLI(s) — the reference image ships Claude Code, pi, and Codex (ADR 0016). */
-  image: string;
+  /**
+   * Docker image carrying your toolchain AND the agent CLI(s) — the reference image ships Claude Code, pi, and Codex (ADR 0016).
+   * Required unless `sandbox` is set.
+   */
+  image?: string;
+  /**
+   * Builds the sandcastle sandbox provider every agent turn, gate and `baseline` runs in, from the
+   * resolved config and this run's bind mounts. Default: Docker on `image` with those mounts. With it
+   * set, `image` is optional, `build` refuses, and the Docker-only stale-image and mount-parent checks
+   * are skipped.
+   */
+  sandbox?: (cfg: ResolvedConfig, ctx: { mounts: MountSpec[] }) => SandboxProvider;
   /** Branch work is cut from, and what gate scoping diffs against. */
   baseBranch: string;
   /** Agent branches are `${branchPrefix}${taskId}`. Default "agent/". */
@@ -656,7 +667,6 @@ export type ResolvedConfig = Required<
   Pick<
     VetinariConfig,
     | "project"
-    | "image"
     | "baseBranch"
     | "branchPrefix"
     | "containerShare"
@@ -878,7 +888,9 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Refusal(`${path} has no default export`);
+  // `image` is only the Docker default's: a configured `sandbox` provider needs none.
   for (const required of ["project", "image", "baseBranch", "gates", "fetchTask"] as const) {
+    if (required === "image" && c.sandbox) continue;
     if (c[required] == null) throw new Refusal(`${path}: missing required field "${required}"`);
   }
   if (!c.gates.length) throw new Refusal(`${path}: "gates" is empty — the orchestrator would verify nothing`);

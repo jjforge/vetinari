@@ -934,6 +934,19 @@ test("loadConfig refuses a waivedFiles that is not a string[], and accepts any s
   assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
 });
 
+test("loadConfig needs an image only for the Docker default: a sandbox factory loads without one", async () => {
+  const noImage = CONFIG_BODY.replace(`  image: "img",\n`, "");
+  const withSandbox = noImage.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  sandbox: () => ({ name: "fake", env: {} }),`);
+  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withSandbox));
+  assert.equal(cfg.image, undefined);
+  assert.equal(typeof cfg.sandbox, "function");
+  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", noImage)), (err: unknown) => {
+    assert.ok(err instanceof Refusal);
+    assert.match(err.message, /missing required field "image"/);
+    return true;
+  });
+});
+
 test("loadConfig refuses a ./-prefixed waivedFiles entry, naming it and suggesting the file key (#627)", async () => {
   const body = CONFIG_BODY.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  waivedFiles: ["README.md", "./docs/x.md"],`);
   await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", body)), (err: unknown) => {

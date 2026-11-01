@@ -453,9 +453,14 @@ async function resumeUnlessLive(start: () => Promise<CampaignOutcome>): Promise<
   }
 }
 
-/** Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). */
+/**
+ * Warn (stderr, never refusing) when `cfg.image` is older than its Dockerfile (#444). A configured
+ * `sandbox` provider has no image, so there is nothing to inspect.
+ */
 function warnIfImageStale(deps: DispatchDeps): void {
-  const { image } = deps.cfg;
+  if (deps.cfg.sandbox) return;
+  // loadConfig refuses a missing image when no `sandbox` is configured.
+  const image = deps.cfg.image!;
   const warning = staleImageWarning(image, DOCKERFILE, deps.readImageFreshness(image, DOCKERFILE));
   if (warning) deps.error(warning);
 }
@@ -469,10 +474,14 @@ function warnIfCredentialsExposed(deps: DispatchDeps): void {
 /**
  * Refuse when a `/home/agent` mount's parent is missing from `cfg.image` or not owned there by the
  * uid sandcastle runs the container as (#512): docker creates a missing parent as root, and the
- * agent then cannot write beside the mount. A probe that could not run never refuses.
+ * agent then cannot write beside the mount. A probe that could not run never refuses. Docker-only:
+ * a configured `sandbox` provider skips it — there is no image to start a `stat` container on.
  */
 function refuseIfMountParentsUnwritable(deps: DispatchDeps): void {
-  const { image, mounts = [] } = deps.cfg;
+  if (deps.cfg.sandbox) return;
+  const { mounts = [] } = deps.cfg;
+  // loadConfig refuses a missing image when no `sandbox` is configured.
+  const image = deps.cfg.image!;
   const uid = process.getuid?.();
   const paths = [...new Set(mounts.flatMap((m) => mountParentPaths(m.sandboxPath)))];
   if (uid === undefined || !paths.length) return;

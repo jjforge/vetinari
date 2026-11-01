@@ -6,7 +6,7 @@ It describes the **shipped defaults**: the `defaultFileSet` resolver and the `gi
 
 ## Where the file-set is read
 
-The planner keeps co-wave tickets file-disjoint, so it needs to know which files each ticket touches. It reads that from the ticket's text (`ticketProse`):
+The planner keeps co-wave tickets file-disjoint (the default; a project can opt out with `fileOverlap: "allow"`, which lays out waves by dependencies alone and leaves a collision to merge — it still reads every ticket's files, to report the overlaps), so it needs to know which files each ticket touches. It reads that from the ticket's text (`ticketProse`):
 
 - **Title + body first.** When the title or body carries a marker line from which at least one cite parses, the comments are ignored entirely. Any such line counts, even one a later line supersedes. "Carries a marker" means a cite _parses_, not that it exists in the tree: a body marker naming an absent file still shadows every comment, and the ticket resolves not confident.
 - **Otherwise, the comments' marker lines.** The marker lines across all comments are joined into one: the union of their cites. This is how a brief posted as a comment is read. A title + body whose marker lines cite nothing (only `Touches: none`, say) does not shadow the comments, so the comments' marker lines are read.

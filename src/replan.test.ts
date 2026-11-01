@@ -219,3 +219,17 @@ test("replan leaves waived files out of collisions, so two unstarted issues shar
 
   assert.deepEqual(result.next, [["102", "103"]]);
 });
+
+test("replan under fileOverlap allow layers the unstarted remainder by dependencies alone (#623)", async () => {
+  // 102, 103 and 104 all share `shared.ts`; only 104's blocker on 103 keeps it in a later wave.
+  const touches = { "101": "a.ts", "102": "shared.ts", "103": "shared.ts", "104": "shared.ts" };
+  const blockedBy = async (id: string) => (id === "104" ? ["103"] : []);
+  const allowed = harnessCfg(touches, { fileOverlap: "allow", blockedBy });
+  launch(allowed, [["101"], ["102"], ["103"], ["104"]]);
+
+  assert.deepEqual((await runReplan(allowed, {})).next, [["102", "103"], ["104"]]);
+
+  const strict = harnessCfg(touches, { fileOverlap: "strict", blockedBy });
+  launch(strict, [["101"], ["102"], ["103"], ["104"]]);
+  assert.equal((await runReplan(strict, {})).unchanged, true);
+});

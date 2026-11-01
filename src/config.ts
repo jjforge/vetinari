@@ -78,6 +78,13 @@ export function questionDestinations(notify: NotifyMap): Set<string> {
 export type ContainerShare = "high" | "medium" | "low";
 
 /**
+ * **File overlap** (ADR 0025): whether the planner keeps co-wave tickets file-disjoint
+ * (`strict`, the default) or layers waves by dependencies alone and leaves a collision to
+ * the merge-time retry (`allow`).
+ */
+export type FileOverlap = "strict" | "allow";
+
+/**
  * The internal fair-share weight each `containerShare` tier maps to — the ratio
  * roughly 7:2:1 (tunable here). Pure; feeds the existing `fairShare` computation
  * unchanged, so the tier is the only surface a project sees. `high` takes a larger
@@ -531,6 +538,13 @@ export interface VetinariConfig {
    */
   waivedFiles?: string[];
   /**
+   * **File overlap** (ADR 0025): `"strict"` (the default) keeps co-wave tickets
+   * file-disjoint; `"allow"` lets tickets that share a file run in the same wave — the
+   * planner, `graft` and `replan` layer by dependencies alone, the dry-run lists each
+   * overlap it did not enforce, and a collision is caught (and retried once) at merge.
+   */
+  fileOverlap?: FileOverlap;
+  /**
    * When set, a green run ends with a "harvest" turn asking the agent for any
    * defect it noticed but did not fix — context that would otherwise vanish with
    * the container — and this files each one somewhere durable.
@@ -646,6 +660,7 @@ export type ResolvedConfig = Required<
     | "baseBranch"
     | "branchPrefix"
     | "containerShare"
+    | "fileOverlap"
     | "gates"
     | "maxTurns"
     | "idleTimeoutSeconds"
@@ -883,6 +898,8 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   // An unknown tier would otherwise map to the `low` weight silently.
   if (c.containerShare !== undefined && !["high", "medium", "low"].includes(c.containerShare))
     throw new Refusal(`${path}: "containerShare" must be "high", "medium" or "low", got ${JSON.stringify(c.containerShare)}`);
+  if (c.fileOverlap !== undefined && !["strict", "allow"].includes(c.fileOverlap))
+    throw new Refusal(`${path}: "fileOverlap" must be "strict" or "allow", got ${JSON.stringify(c.fileOverlap)}`);
   if (c.notify) {
     const qDests = questionDestinations(c.notify);
     if (qDests.size > 1) {
@@ -905,6 +922,7 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   return {
     branchPrefix: "agent/",
     containerShare: "medium",
+    fileOverlap: "strict",
     maxTurns: 6,
     idleTimeoutSeconds: 600,
     parkGraceSeconds: 0,

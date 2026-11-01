@@ -459,9 +459,16 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
       // as a chip in the wave it joined, and mark it `grafted` while it stays unstarted.
       // The persisted `fileKeys` wire field maps into the pure fold's `fileKeys`; a log
       // written before the rename carried the same value under `basenames`, read as a fallback.
+      // The `fileOverlap: "allow"` marker (ADR 0025) passes through, so an allow-mode graft
+      // replays by dependencies alone; an unmarked one replays file-disjointly, as it always has.
       const applied = applyGraft(
         { waves, outcomes, currentWave },
-        { ids: e.ids.map(String), blockedBy: e.blockedBy ?? {}, fileKeys: e.fileKeys ?? e.basenames ?? {} },
+        {
+          ids: e.ids.map(String),
+          blockedBy: e.blockedBy ?? {},
+          fileKeys: e.fileKeys ?? e.basenames ?? {},
+          ...(e.fileOverlap === "allow" && { fileOverlap: "allow" as const }),
+        },
       );
       const placeOf = new Map<string, number>();
       applied.remaining.forEach((wave, i) => wave.forEach((id) => placeOf.set(id, i)));

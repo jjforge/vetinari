@@ -120,6 +120,9 @@ export interface GraftResult {
     blockedBy: Record<string, string[]>;
     fileKeys: Record<string, string[]>;
     titles: Record<string, string>;
+    /** set when the project runs `fileOverlap: "allow"` (ADR 0025), so the fold places
+     *  this graft by dependencies alone; absent under `strict`. */
+    fileOverlap?: "allow";
   };
   /** the `progress:graft` outbound message — enqueued unless `dryRun`; absent on a
    *  `--dry-run` that disclosed a rejection. Built by the one §10 notice skeleton. */
@@ -279,6 +282,10 @@ export async function runGraft(
     }),
   );
 
+  // Under `fileOverlap: "allow"` (ADR 0025) the event carries the marker, so the fold — here
+  // and on every replay — places by dependencies alone. A strict graft logs none, as before.
+  const overlap = cfg.fileOverlap === "allow" ? { fileOverlap: "allow" as const } : {};
+
   // Preview the placement off the same pure fold the loop will run.
   const applied = applyGraft(
     {
@@ -286,7 +293,7 @@ export async function runGraft(
       outcomes: reduced.outcomes,
       currentWave: reduced.currentWave,
     },
-    { ids: normalized, blockedBy, fileKeys },
+    { ids: normalized, blockedBy, fileKeys, ...overlap },
   );
   const placeOf = new Map<string, number>();
   applied.remaining.forEach((wave, i) => wave.forEach((m) => placeOf.set(m, i)));
@@ -298,7 +305,7 @@ export async function runGraft(
   // The persisted event names its layering input `fileKeys`, matching the pure fold's
   // vocabulary (ADR 0014). A log written before this rename carried the same value under
   // `basenames`; the reducer's reader accepts either, preferring `fileKeys`.
-  const event = { ids: normalized, blockedBy, fileKeys, titles };
+  const event = { ids: normalized, blockedBy, fileKeys, titles, ...overlap };
   const outbound = notice({
     emoji: "🌱",
     project: cfg.project,

@@ -1347,3 +1347,16 @@ test("reduceCampaign: a legacy prune event (no dropTarget) of a conflict-parked 
   assert.equal(reduced.outcomes.get("701"), "running");
   assert.equal(reduced.closedWaves.has(0), false, "the conflict still holds the wave");
 });
+
+test("reduceCampaign refolds a graft by its fileOverlap marker: allow joins a shared-key wave, an unmarked graft spills as before (#623)", () => {
+  const replay = (marker: { fileOverlap?: "allow" }) =>
+    reduceCampaign([
+      event("campaign-start", { ts: "t0", waves: [["101"], ["102"]], slots: 1 }),
+      event("wave-start", { ts: "t1", index: 0, tasks: ["101"] }),
+      event("graft", { ts: "t2", ids: ["301"], blockedBy: {}, fileKeys: { "102": ["b.ts"], "301": ["b.ts"] }, ...marker }),
+    ]).waves;
+
+  assert.deepEqual(replay({ fileOverlap: "allow" }), [["101"], ["102", "301"]]);
+  // A graft logged without the marker — strict, and every graft logged before the setting.
+  assert.deepEqual(replay({}), [["101"], ["102"], ["301"]]);
+});

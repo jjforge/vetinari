@@ -235,6 +235,14 @@ both edit — a large, sectioned doc most issues update. Issues still cite it on
 plan, and integration catches the rare real conflict.
 _Avoid_: shared file, exempt file, ignored file.
 
+**File overlap** (`fileOverlap`):
+The project's rule for co-[[wave]] issues whose file keys collide (ADR 0025).
+`"strict"`, the default, keeps every wave **file-disjoint**: two issues that share
+a file never run in the same wave. `"allow"` layers waves by dependencies alone,
+lists each overlap in the plan, and leaves a real collision to the merge-time
+retry — a second collision parks [[conflict]].
+_Avoid_: loose mode, optimistic locking.
+
 **Under-specified ticket**:
 An [[issue]] whose file-set resolves `confident: false` — cites nothing, or cites
 what the tree lacks. The planner never schedules it silently: it halts and asks to

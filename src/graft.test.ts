@@ -417,3 +417,29 @@ test("a graft whose only shared key with an unstarted member is waived lands in 
   assert.deepEqual(result.placement, [{ id: "301", wave: 2 }]);
   assert.deepEqual(result.event!.fileKeys, { "101": ["a.ts"], "102": ["b.ts"], "301": ["c.ts"] });
 });
+
+test("under fileOverlap allow a graft joins the unstarted member it shares a key with, and its event carries the marker (#623)", async () => {
+  const touches: Record<string, string> = { "101": "a.ts", "102": "b.ts", "301": "b.ts" };
+  const overlapCfg = (fileOverlap: "strict" | "allow") => {
+    const cfg = harnessCfg({
+      fetchTask: async (id: string) => JSON.stringify({ state: "OPEN", body: `Touches: ${touches[id]}` }),
+      fileSet: (ticket: string) => ({ files: ticket.match(/Touches: (.*)/)![1].split(" "), confident: true }),
+      fileOverlap,
+    });
+    launch(cfg, [["101"], ["102"]]);
+    return cfg;
+  };
+
+  const allowed = await runGraft(overlapCfg("allow"), ["301"], {});
+  assert.deepEqual(allowed.placement, [{ id: "301", wave: 2 }]);
+  assert.equal(allowed.event!.fileOverlap, "allow");
+
+  const strictCfg = overlapCfg("strict");
+  const strict = await runGraft(strictCfg, ["301"], {});
+  assert.deepEqual(strict.placement, [{ id: "301", wave: 3 }]);
+  assert.equal(strict.event!.fileOverlap, undefined);
+  assert.equal(
+    readEventLog(strictCfg).some((e) => e.event === "graft" && "fileOverlap" in e),
+    false,
+  );
+});

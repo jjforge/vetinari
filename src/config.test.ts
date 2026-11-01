@@ -983,3 +983,16 @@ test("loadConfig accepts each containerShare tier, and defaults an absent one to
   const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
   assert.equal(cfg.containerShare, "medium");
 });
+
+const withFileOverlap = (mode: string) => CONFIG_BODY.replace("fetchTask:", `fileOverlap: ${mode},\n  fetchTask:`);
+
+test("loadConfig resolves an absent fileOverlap to strict, accepts allow, and refuses any other mode (#623)", async () => {
+  assert.equal((await loadConfig(writeConfig(scratch(), "vetinari/config.mts"))).fileOverlap, "strict");
+  assert.equal((await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withFileOverlap(`"allow"`)))).fileOverlap, "allow");
+  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withFileOverlap(`"loose"`));
+  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
+    assert.ok(err instanceof Refusal);
+    assert.equal(err.message, `${cfgPath}: "fileOverlap" must be "strict" or "allow", got "loose"`);
+    return true;
+  });
+});

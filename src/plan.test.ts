@@ -145,6 +145,50 @@ const assertPlacementInvariants = (plan: { waves: string[][] }, edges: Record<st
   }
 };
 
+// Plan through `planCampaign` under a project's `fileOverlap` mode.
+const planOverlapping = (fileOverlap: "strict" | "allow", edges: Record<string, string[]> = {}) =>
+  planCampaign(["101", "102"], {
+    blockedBy: openBlockedByFrom(edges),
+    fileSet: () => ({ files: ["src/a.ts"], confident: true }),
+    onUnderspecified: () => {
+      throw new Error("must not prompt a confident set");
+    },
+    fileOverlap,
+  });
+
+test("planCampaign under fileOverlap allow layers two tickets sharing a file by dependencies alone (#623)", async () => {
+  assert.deepEqual((await planOverlapping("allow")).waves, [["101", "102"]]);
+  assert.deepEqual((await planOverlapping("strict")).waves, [["101"], ["102"]]);
+  assert.deepEqual((await planOverlapping("allow", { "102": ["101"] })).waves, [["101"], ["102"]]);
+});
+
+test("describePlan under fileOverlap allow lists each unenforced overlap and bounds by dependency depth (#623)", async () => {
+  const report = describePlan(await planOverlapping("allow"));
+
+  assert.match(report, /^overlap allowed: #101 and #102 share src\/a\.ts$/m);
+  assert.match(report, /^lower bound: 1 wave — set by the dependency chain, 1 ticket deep$/m);
+  assert.match(report, /^Most-shared files:\n {2}src\/a\.ts {2}2 tickets$/m);
+  // A dependency keeps them in separate waves, so there is no co-wave overlap to list.
+  assert.doesNotMatch(describePlan(await planOverlapping("allow", { "102": ["101"] })), /overlap allowed/);
+});
+
+test("describePlan under fileOverlap strict reports a shared file as today, with no overlap section (#623)", async () => {
+  assert.equal(
+    describePlan(await planOverlapping("strict")),
+    [
+      "campaign: 2 wave(s), 2 ticket(s) scheduled, 0 unreachable.",
+      "",
+      "  wave 0  #101  — no open blocker in the selected set",
+      "  wave 1  #102  — no open blocker in the selected set; spilled — shares src/a.ts with #101",
+      "",
+      "lower bound: 2 waves — 2 tickets share src/a.ts (dependency depth 1)",
+      "",
+      "Most-shared files:",
+      "  src/a.ts  2 tickets",
+    ].join("\n"),
+  );
+});
+
 test("planCampaign places the most-colliding ticket first, one wave shorter than input-order first-fit", async () => {
   // Input-order first-fit packs a+b into wave 0, spills c (p) to 1 and d (q, r) to 2.
   // c and d collide most, so placing them first fits the four into two waves.
@@ -921,6 +965,17 @@ test("applyGraft packs file-disjoint grafts into the same later wave", () => {
   assert.deepEqual(res.remaining, [["101"], ["301", "302"]]);
 });
 
+test("applyGraft under the fileOverlap allow marker joins a later wave it shares a key with, still after its blockers (#623)", () => {
+  const campaign = { waves: [["101"], ["201"]], outcomes: graftOutcomes({}), currentWave: 0 };
+  const fileKeys = { "301": ["a.ts"], "302": ["a.ts"], "201": ["a.ts"] };
+  const res = applyGraft(campaign, { ids: ["301", "302"], blockedBy: { "302": ["201"] }, fileKeys, fileOverlap: "allow" });
+
+  // 301 shares a.ts with the unstarted 201 yet joins its wave; 302 still waits on 201.
+  assert.deepEqual(res.remaining, [["101"], ["201", "301"], ["302"]]);
+  // Without the marker the same graft spills 301 past 201, as it always has.
+  assert.deepEqual(applyGraft(campaign, { ids: ["301"], blockedBy: {}, fileKeys }).remaining, [["101"], ["201"], ["301"]]);
+});
+
 test("validateGraftTargets rejects unknown, closed and already-in-campaign ids, in input order (#166)", () => {
   const rejections = validateGraftTargets(["301", "302", "303", "101"], {
     inCampaign: new Set(["101"]),
@@ -1495,4 +1550,15 @@ test("describePlan names the file when its group ties the dependency chain (#612
   const plan = await planWith(["a", "b", "c", "d"], { b: ["a"] }, { a: ["a.md"], b: ["b.md"], c: ["x.md"], d: ["x.md"] });
 
   assert.match(describePlan(plan), /^lower bound: 2 waves — 2 tickets share x\.md \(dependency depth 2\)$/m);
+});
+
+test("runCampaignPlan plans under the config's fileOverlap mode, defaulting to strict (#623)", async () => {
+  const tasks = { "1": "Touches: src/a.ts", "2": "Touches: src/a.ts" };
+  const run = (fileOverlap?: "strict" | "allow") =>
+    runCampaignPlan({ ...waivedCfgFrom(tasks), fileOverlap }, ["1", "2"], {}, { isTTY: false, ask: () => "fail" });
+
+  const allowed = await run("allow");
+  assert.deepEqual(allowed.waves, [["1", "2"]]);
+  assert.match(allowed.report, /^overlap allowed: #1 and #2 share src\/a\.ts$/m);
+  assert.deepEqual((await run()).waves, [["1"], ["2"]]);
 });

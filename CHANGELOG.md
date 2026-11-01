@@ -43,6 +43,7 @@ Within a milestone each bold section label appears at most once.
 - [user] A member pruned and then grafted back now shows once on the dashboard, as grafted, rather than twice as pruned (#662).
 - [ops] A failed issue read during the vetinari-paths check no longer leaves the agent's `vetinari/` change merged on the base: the merge is undone before the error ends the campaign, so a redrive checks it again (#663).
 - [user] The dashboard's prune confirm no longer says "no dependents" while listing members it keeps: when the prune drops nothing besides its target it reads "drops nothing else" (#665).
+- [ops] The `/review-logs` config lens no longer suggests waiving a package directory: a waive candidate that is a directory (a `packageScopedFileSet` key) is listed under "Not waivable (package keys)" instead, since `waivedFiles` takes only single files (#667).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).

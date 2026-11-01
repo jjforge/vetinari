@@ -143,8 +143,10 @@ the container is `.vetinari.local/.env` (design §9, ADR 0011).
 | `.vetinari.local/outbox/<id>.json` | a category-tagged outbound record a run enqueues for the gateway to send (design §2.6) |
 | `.vetinari.local/routing.json` | this project's `destinations`/`notify` materialized for the gateway to read |
 | `.vetinari.local/logs/orchestrator.jsonl` | the event log — one JSON object per line, append-only for the life of a run (design §2.1) |
-| `.vetinari.local/logs/gate-<ts>-<n>.log` | full stdout/stderr of one gate run |
-| `.vetinari.local/logs/dashboard/<verb>-<ts>.log` | full stdout/stderr of one `redrive` or `answer` the dashboard started — a 202 "started" response names the file (not rotated) |
+| `.vetinari.local/logs/gate-<ts>-<n>.log` | full stdout/stderr of one gate run (deleted when a run is archived once unwritten for 30 days) |
+| `.vetinari.local/logs/agent-<task>.log` | the runner's human-readable transcript of the issue's agent run (deleted when a run is archived once unwritten for 30 days) |
+| `.vetinari.local/logs/activity-<task>.jsonl` | the issue's live-tail activity stream, one event per line, truncated each run (deleted when a run is archived once unwritten for 30 days) |
+| `.vetinari.local/logs/dashboard/<verb>-<ts>.log` | full stdout/stderr of one `redrive` or `answer` the dashboard started — a 202 "started" response names the file (deleted when a run is archived once unwritten for 30 days) |
 | `.vetinari.local/logs/archive/orchestrator-<ts>.jsonl` | a finished run's log, moved aside on clean completion or `clear` (kept, never deleted) |
 | host config dir | the registry, the container lease, the `max-concurrent-containers` file, and the host log — beside each other, not per-project (e.g. `~/.config/vetinari/`) |
 | `<host config dir>/logs/host.jsonl` | host-level diagnostics: the `gateway`/`status` daemon's own events, appended across restarts |

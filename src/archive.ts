@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
 import { campaignSettled, campaignStarted } from "./campaign-fold.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
@@ -37,6 +37,54 @@ export function archiveRun(cfg: ResolvedConfig): ArchiveResult {
   const clearedOutbound = clearSentOutbound(cfg);
 
   return { archivedLog, clearedOutbound };
+}
+
+/** How long a gate, agent, activity or dashboard-action log may go unwritten before an archive sweeps it. */
+export const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The per-run log names in `logs/` the sweep may delete (`writeGateLog`, `agentLogPath`, `activityLogPath`). */
+const SWEPT_RUN_LOG_NAME = /^(gate-.*\.log|agent-.*\.log|activity-.*\.jsonl)$/;
+/** The dashboard-action logs in `logs/dashboard/` the sweep may delete (`<verb>-<ts>.log`). */
+const SWEPT_DASHBOARD_LOG_NAME = /\.log$/;
+
+/**
+ * Delete the project's per-run logs not written for `LOG_RETENTION_MS`, returning how many
+ * went. Only `gate-*.log`, `agent-*.log` and `activity-*.jsonl` directly in `logs/`, and
+ * `*.log` directly in `logs/dashboard/`, are candidates; `orchestrator.jsonl`,
+ * `logs/archive/` (archives are kept forever) and any other file are never touched.
+ * Best-effort: a file that can't be stat'ed or unlinked is skipped and a missing directory
+ * reads 0, so it never throws and can never fail an archive.
+ */
+export function sweepOldLogs(stateDir: string, now: number = Date.now()): number {
+  const cutoff = now - LOG_RETENTION_MS;
+  return (
+    sweepLogDir(`${stateDir}/logs`, SWEPT_RUN_LOG_NAME, cutoff) +
+    sweepLogDir(`${stateDir}/logs/dashboard`, SWEPT_DASHBOARD_LOG_NAME, cutoff)
+  );
+}
+
+/** Unlink each file directly in `dir` whose name matches `pattern` and whose mtime is before `cutoff`. */
+function sweepLogDir(dir: string, pattern: RegExp, cutoff: number): number {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  let swept = 0;
+  for (const name of names) {
+    if (!pattern.test(name)) continue;
+    const path = `${dir}/${name}`;
+    try {
+      const st = statSync(path);
+      if (!st.isFile() || st.mtimeMs >= cutoff) continue;
+      unlinkSync(path);
+      swept++;
+    } catch {
+      // vanished or unremovable mid-sweep — skip it
+    }
+  }
+  return swept;
 }
 
 /**

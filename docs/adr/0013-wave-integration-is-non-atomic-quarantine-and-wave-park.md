@@ -39,7 +39,9 @@ Around that core:
 - **Campaign flow.** A quarantine that orphans dependents in *later* waves pauses the
   campaign at the wave boundary — the blast-radius call belongs to a human. A
   quarantine that orphans nothing does not stop anything. `campaign --auto-prune`
-  opts into pruning the quarantined issue's dependent closure and running on.
+  opts into pruning the quarantined issue's dependent closure and running on; the
+  quarantined issue itself stays and holds its wave (only a manual `prune <issue>`
+  drops it — see [ADR 0005](0005-prune-is-an-event-that-trims-the-running-campaign.md)).
 - **Prune preserves work.** Prune keeps the pruned issue's branch + worktree +
   session by default so it can be investigated and resumed; `--purge` is the rare
   true-drop.

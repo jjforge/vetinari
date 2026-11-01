@@ -55,6 +55,7 @@ import {
   type SlotLease,
 } from "./host-slots.ts";
 import { defaultPruneDeps, runPrune } from "./prune.ts";
+import { reduceCampaign } from "./dashboard-model.ts";
 import { withEnv } from "./test-support.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -3215,4 +3216,35 @@ test("a prune of a crashed campaign's in-flight wave (no live flag) drops its un
   };
   assert.equal(await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, spawnRun))), "done");
   assert.deepEqual(spawned, ["103"]);
+});
+
+test("a redrive after a manual prune of a conflict-parked target neither spawns nor re-integrates it, and closes the wave (#559)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-pruned-conflict-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  cfg.log.log("campaign-start", { waves: [["101", "701"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
+  cfg.log.log("merged", { taskId: "101" });
+  cfg.log.log("green", { taskId: "701", branch: "agent/701", commits: ["a"] });
+  cfg.log.log("parked", { taskId: "701", reason: "conflict" });
+  cfg.log.log("campaign-parked", { index: 0, reason: "conflict", detail: "701 conflict" });
+  // The operator follows the conflict notice's advice: `prune 701`. 101 survives, so wave 0 does too.
+  cfg.log.log("prune", { target: "701", removed: ["701"], dropped: ["701"], dropTarget: true });
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
+
+  assert.equal(ok, "done");
+  assert.ok(!spawned.includes("701"), "the pruned target is not respawned");
+  assert.ok(
+    integrated.every((greens) => !greens.includes("701")),
+    "the pruned target's conflicting merge is not retried",
+  );
+  const events = readEventLog(cfg);
+  assert.ok(
+    events.some((e) => e.event === "wave-done" && e.index === 0),
+    "the redrive closed wave 0",
+  );
+  assert.ok(reduceCampaign(events).closedWaves.has(0));
 });

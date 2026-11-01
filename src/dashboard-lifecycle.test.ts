@@ -1302,3 +1302,48 @@ test("ungatedMerge counts only events since the latest campaign-start", () => {
   const reduced = reduceCampaign([...ungatedStart, event("campaign-start", { ts: "t5", waves: [["B"]], slots: 1 })]);
   assert.equal(reduced.ungatedMerge, false);
 });
+
+// --- a prune whose target is conflict-parked (#559) ---
+// 701 went green, then its merge conflicted: a pending green held by the `conflictParked` overlay.
+const conflictParkedLog = (): OrchestratorEvent[] => [
+  event("campaign-start", { ts: "t0", waves: [["101", "701"]], slots: 2 }),
+  event("wave-start", { ts: "t1", index: 0, tasks: ["101", "701"] }),
+  event("merged", { ts: "t2", taskId: "101" }),
+  event("green", { ts: "t3", taskId: "701", branch: "agent/701", commits: [] }),
+  event("parked", { ts: "t4", taskId: "701", reason: "conflict", detail: "CONFLICT" }),
+  event("campaign-parked", { ts: "t5", index: 0, reason: "conflict", detail: "701 conflict" }),
+];
+
+test("reduceCampaign: a grafted-back conflict-parked target a manual prune dropped reads grafted, not running (#559)", () => {
+  const reduced = reduceCampaign([
+    ...conflictParkedLog(),
+    event("prune", { ts: "t6", target: "701", removed: ["701"], dropped: ["701"], dropTarget: true }),
+    event("graft", { ts: "t7", ids: ["701"], blockedBy: {}, fileKeys: {} }),
+  ]);
+  assert.equal(reduced.outcomes.has("701"), false);
+  assert.equal(reduced.grafted.has("701"), true);
+  assert.notEqual(issueLifecycle(reduced, "701").state, "running");
+});
+
+test("reduceCampaign: an auto-prune's unmarked event keeps its conflict-parked target holding the wave (#559)", () => {
+  // `campaign --auto-prune` logs the conflict target in `removed` but never marks `dropTarget`.
+  const reduced = reduceCampaign([...conflictParkedLog(), event("prune", { ts: "t6", target: "701", removed: ["701"], dropped: [] })]);
+  assert.equal(reduced.conflictParked.has("701"), true);
+  assert.deepEqual(reduced.waves, [["101", "701"]]);
+  assert.equal(reduced.pruned.has("701"), false);
+  assert.deepEqual(issueLifecycle(reduced, "701"), { state: "parked", reason: "conflict" });
+});
+
+test("reduceCampaign: a legacy prune event (no dropTarget) of a conflict-parked target replays as before (#559)", () => {
+  // A manual prune logged before the marker existed: its target stays, still a pending green
+  // whose conflict holds the wave.
+  const reduced = reduceCampaign([
+    ...conflictParkedLog(),
+    event("prune", { ts: "t6", target: "701", removed: ["701"], dropped: [] }),
+    event("wave-done", { ts: "t7", index: 0, merged: [] }),
+  ]);
+  assert.equal(reduced.conflictParked.has("701"), true);
+  assert.equal(reduced.pendingGreen.has("701"), true);
+  assert.equal(reduced.outcomes.get("701"), "running");
+  assert.equal(reduced.closedWaves.has(0), false, "the conflict still holds the wave");
+});

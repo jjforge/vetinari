@@ -74,8 +74,8 @@ _Avoid_: working, in progress.
 Held on a human, work preserved, resumable — the one word for every "needs a
 human" situation, at the [[issue]], [[wave]], campaign and card level alike. What
 differs is the [[park-reason]], which selects the recovery. Durable: shown until a
-human resolves it, and announced too — except a `stopped` park, which is shown but
-never announced (a person already stopped it; there is nothing to ask).
+human resolves it, and announced too — except a `stopped` or `outdated-agent` park,
+which is shown but never announced (there is nothing to ask).
 _Avoid_: blocked, waiting, quarantined, wave-parked, interrupted (each is
 `parked` + a reason).
 
@@ -121,6 +121,15 @@ Why a [[parked]] issue or wave is held, and which recovery it offers — metadat
 the park, not a status. One enum: `question | stalled | conflict | red-base |
 crash | stopped | outdated-agent`.
 _Avoid_: quarantined, interrupted (those were reasons masquerading as statuses).
+
+**Answerable park**:
+A [[parked]] hold a human resolves by answering it: `question` and `stalled`.
+The answer resumes the same session.
+
+**Redrive-only park**:
+A [[parked]] hold an answer cannot resolve: `conflict`, `red-base`, `crash`,
+`stopped` and `outdated-agent`. The human fixes the cause, then [[redrive]].
+_Avoid_: unanswerable.
 
 **question**:
 The [[agent]] asked something only a human can answer. Answer it and the campaign

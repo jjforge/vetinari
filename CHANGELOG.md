@@ -35,6 +35,7 @@ Within a milestone each bold section label appears at most once.
 - [ops] A stale registry pointer logs `registry-stale` once per process instead of on every gateway tick, and the dashboard stops re-reading unchanged run archives and the whole event log on each update (#669).
 - [user] The `outdated-agent` recovery advice now says to update the agent CLI in the project's sandbox, naming `vetinari build` for the default Docker image, so it holds for a non-Docker sandbox too (#672).
 - [ops] Harvested findings dedupe at a word-similarity score of 0.35 instead of 0.5, which catches rewordings the old threshold missed, and a "seen again" comment now quotes the new finding's wording (#673).
+- [ops] The gateway's systemd unit now sets `KillMode=process`, and the gateway exits cleanly on SIGTERM, so `vetinari gateway restart` no longer kills the campaigns, answers and prunes it launched. Re-run `vetinari gateway install` and `systemctl --user daemon-reload` to pick it up (#533).
 
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
@@ -51,6 +52,8 @@ Within a milestone each bold section label appears at most once.
 - [user] The dashboard's prune confirm no longer says "no dependents" while listing members it keeps: when the prune drops nothing besides its target it reads "drops nothing else" (#665).
 - [ops] The `/review-logs` config lens no longer suggests waiving a package directory: a waive candidate that is a directory (a `packageScopedFileSet` key) is listed under "Not waivable (package keys)" instead, since `waivedFiles` takes only single files (#667).
 - [user] The gateway now hears replies and commands from every chat a bot's projects use, including a separate `question` destination or a second project's chat on a shared bot, instead of silently dropping all but one chat's; it answers a command in the chat it came from. Replies are matched per chat (#660).
+- [ops] A gate now times out after its `timeoutSeconds` (default 3600 s) and reads as a red gate whose report says it timed out, instead of hanging its run and the wave (#531).
+- [ops] The vetinari-paths check reads the brief's declared files with the default resolver, whatever the project's `fileSet`, so a project on `packageScopedFileSet` can declare a `vetinari/` change (#664).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).

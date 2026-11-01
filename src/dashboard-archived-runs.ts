@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { hostLogger, type Logger } from "./log.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
 import { reduceCampaign } from "./dashboard-lifecycle.ts";
@@ -79,39 +79,79 @@ export interface ArchivedRun {
  * `archiveRun`'s own `logs/archive` layout). */
 const archiveDirOf = (baseLocation: string) => join(baseLocation, "logs", "archive");
 
+/** One archive's derived summary, keyed by path and valid while the file's mtime and
+ * size match: its listing entry (absent for an archive the listing skips) and its
+ * completed merges as `[issueNumber, mergedAtTs]` pairs. Archives never change once
+ * written, so a landing load reads and reduces each one once per process. */
+interface ArchiveCacheEntry {
+  mtimeMs: number;
+  size: number;
+  run?: ArchivedRun;
+  merges: ReadonlyArray<readonly [string, string]>;
+}
+const archiveCache = new Map<string, ArchiveCacheEntry>();
+
+/** The cache entry for one archive file, read and reduced only when it is new or its
+ * mtime/size moved. A malformed archive logs `status-archive-skipped` on that (re)read,
+ * never on a cache hit. */
+function archiveEntry(file: string, token: string, logger: Logger): ArchiveCacheEntry {
+  const { mtimeMs, size } = statSync(file);
+  const cached = archiveCache.get(file);
+  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached;
+  const events = readEventLog({ logFile: file });
+  const { waves, layout, name: runName, outcomes, mergedAt } = reduceCampaign(events);
+  const merges = [...mergedAt].filter(([issue]) => outcomes.get(issue) === "completed");
+  let run: ArchivedRun | undefined;
+  if (waves.length) {
+    run = {
+      run: token,
+      file,
+      summary: summarizeRun(events),
+      name: runName,
+      state: archivedRunState(events),
+      startedAt: parseRunTimestamp(token),
+      issues: layout.flat().length,
+    };
+  } else {
+    logger.log("status-archive-skipped", { file });
+  }
+  const entry = { mtimeMs, size, run, merges };
+  archiveCache.set(file, entry);
+  return entry;
+}
+
+/** The run token an archive's `orchestrator-<timestamp>.jsonl` filename carries. */
+const archiveToken = (name: string): string | undefined => name.match(/^orchestrator-(.+)\.jsonl$/)?.[1];
+
 /**
  * List a project's archived runs newest-first, each with the one-line summary
  * `summarizeRun` folds from its log. The timestamp token is read off the
  * `orchestrator-<timestamp>.jsonl` filename `archiveRun` wrote, so it sorts
  * lexicographically into newest-first (ISO stamps are zero-padded). A malformed
  * archive — one no run can be reconstructed from — is skipped with a log line,
- * never fatal: one bad file must not take the whole list down.
+ * never fatal: one bad file must not take the whole list down. Each archive's
+ * summary is cached by path + mtime + size, so an unchanged one is not re-read.
  */
 export function listArchivedRuns(baseLocation: string, logger: Logger = hostLogger()): ArchivedRun[] {
   const dir = archiveDirOf(baseLocation);
   if (!existsSync(dir)) return [];
   const runs: ArchivedRun[] = [];
   for (const name of readdirSync(dir)) {
-    const match = name.match(/^orchestrator-(.+)\.jsonl$/);
-    if (!match) continue;
-    const file = join(dir, name);
-    const events = readEventLog({ logFile: file });
-    const { waves, layout, name: runName } = reduceCampaign(events);
-    if (!waves.length) {
-      logger.log("status-archive-skipped", { file });
-      continue;
-    }
-    runs.push({
-      run: match[1],
-      file,
-      summary: summarizeRun(events),
-      name: runName,
-      state: archivedRunState(events),
-      startedAt: parseRunTimestamp(match[1]),
-      issues: layout.flat().length,
-    });
+    const token = archiveToken(name);
+    if (token === undefined) continue;
+    const { run } = archiveEntry(join(dir, name), token, logger);
+    if (run) runs.push(run);
   }
   return runs.sort((a, b) => (a.run < b.run ? 1 : a.run > b.run ? -1 : 0));
+}
+
+/**
+ * One archive's completed merges as `[issueNumber, mergedAtTs]` pairs — each
+ * `mergedAt` entry whose outcome is `completed` — served through the same
+ * path + mtime + size cache as {@link listArchivedRuns}.
+ */
+export function archivedRunMerges(file: string, logger: Logger = hostLogger()): ReadonlyArray<readonly [string, string]> {
+  return archiveEntry(file, archiveToken(basename(file)) ?? basename(file), logger).merges;
 }
 
 /**

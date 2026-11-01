@@ -10,6 +10,7 @@ import { describeEvent, festiveFor, formatFeedEvent, lastEventText, titlesFromLo
 import { campaignState, reduceCampaign } from "./dashboard-lifecycle.ts";
 import {
   type ArchivedRunState,
+  archivedRunMerges,
   archivedRunState,
   lastEventStamp,
   listArchivedRuns,
@@ -213,26 +214,28 @@ const sameLocalDay = (iso: string, day: Date) => {
  * How many of a project's issues merged (completed) on `now`'s day, counted across
  * *every* one of its runs — the live run plus every archived run
  * (`listArchivedRuns`), not just the latest (#97). Each run is reduced
- * independently and an issue that completed today in it is added to a per-project
+ * independently (an archive once, through `archivedRunMerges`' cache) and an issue
+ * that completed today in it is added to a per-project
  * set, so an issue appearing in more than one run (a re-run) is counted once. Read-
- * only over the logs (ADR 0002); a run whose reduce throws is skipped with a log
- * line so one bad archive can never zero the count. "Today" is the operator's
+ * only over the logs (ADR 0002); a live run whose reduce throws is skipped with a
+ * log line so it can never zero the count. "Today" is the operator's
  * local day (see `sameLocalDay`), so a merge just past midnight UTC still counts
  * for the local day the operator is actually in (#97).
  */
 const mergedTodayForProject = (baseLocation: string, liveEvents: OrchestratorEvent[], now: Date, logger: Logger): number => {
   const merged = new Set<string>();
-  const runs = [liveEvents, ...listArchivedRuns(baseLocation, logger).map((r) => readEventLog({ logFile: r.file }))];
-  for (const runEvents of runs) {
-    try {
-      const { mergedAt, outcomes } = reduceCampaign(runEvents);
-      for (const [issueNumber, ts] of mergedAt) {
-        if (outcomes.get(issueNumber) === "completed" && sameLocalDay(ts, now)) merged.add(issueNumber);
-      }
-    } catch (error) {
-      logger.log("status-merged-today-skipped", { baseLocation, error: String(error) });
-    }
+  const countToday = (merges: Iterable<readonly [string, string]>) => {
+    for (const [issueNumber, ts] of merges) if (sameLocalDay(ts, now)) merged.add(issueNumber);
+  };
+  try {
+    const { mergedAt, outcomes } = reduceCampaign(liveEvents);
+    countToday([...mergedAt].filter(([issueNumber]) => outcomes.get(issueNumber) === "completed"));
+  } catch (error) {
+    logger.log("status-merged-today-skipped", { baseLocation, error: String(error) });
   }
+  // Each archive's completed merges come from its path + mtime + size cache, so an
+  // unchanged archive is not re-read or re-reduced on every landing load.
+  for (const run of listArchivedRuns(baseLocation, logger)) countToday(archivedRunMerges(run.file, logger));
   return merged.size;
 };
 

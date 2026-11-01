@@ -18,6 +18,7 @@ import { computePrune, restrictBlockers, type BlockedByOf } from "./prune.ts";
 import { isIssueToken, normalize } from "./issue-id.ts";
 import { BARE_KEY_MARKER, defaultFileSet, ticketProse, waiveFileSet, type FileSet, type FileSetOf } from "./fileset.ts";
 import { Refusal } from "./refusal.ts";
+import type { FileOverlap } from "./config.ts";
 
 export interface Placement {
   id: string;
@@ -223,6 +224,9 @@ export interface CampaignPlanDeps {
   fileSet: (id: string) => FileSet | Promise<FileSet>;
   /** consulted when any scheduled ticket resolves to `confident: false`. */
   onUnderspecified: UnderspecifiedPrompt;
+  /** the project's file-overlap mode (ADR 0025); absent reads as `strict`. Under `allow`
+   *  file-sets are still resolved and checked, but the waves are the dependency layering alone. */
+  fileOverlap?: FileOverlap;
 }
 
 /** A `WavePlan` plus the record of any under-specified halt that shaped it. */
@@ -261,6 +265,9 @@ export interface CampaignPlan extends WavePlan {
    * already-waived files. Absent on a one-issue selection, which resolves no file-sets.
    */
   preWaiveFileKeys?: Record<string, string[]>;
+  /** `allow` when the plan was layered by dependencies alone, its file overlaps left to merge
+   *  (ADR 0025), so the report lists them and bounds by dependency depth. Absent under `strict`. */
+  fileOverlap?: "allow";
 }
 
 /** A fileKey is a **bare key** — names a file only by its name, because its cite could not
@@ -583,6 +590,21 @@ function fileGroups(fileKeys: Record<string, string[]>): { file: string; tickets
     .sort((a, b) => b.tickets - a.tickets);
 }
 
+/** Each pair of co-wave tickets whose fileKeys collide (`keysCollide`) — the overlaps a plan
+ *  under `fileOverlap: "allow"` did not enforce (ADR 0025) — with the first ticket's colliding keys. */
+function unenforcedOverlaps(waves: string[][], fileKeys: Record<string, string[]>): string[] {
+  const lines: string[] = [];
+  for (const wave of waves) {
+    wave.forEach((a, i) => {
+      for (const b of wave.slice(i + 1)) {
+        const shared = (fileKeys[a] ?? []).filter((k) => (fileKeys[b] ?? []).some((o) => keysCollide(k, o)));
+        if (shared.length) lines.push(`overlap allowed: #${a} and #${b} share ${shared.join(", ")}`);
+      }
+    });
+  }
+  return lines;
+}
+
 /**
  * A human-readable provenance report: each scheduled ticket with its wave and
  * why it is there, then every dropped ticket with the reason it cannot run
@@ -592,7 +614,9 @@ function fileGroups(fileKeys: Record<string, string[]>): { file: string; tickets
  */
 export function describePlan(
   plan: WavePlan &
-    Partial<Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged" | "waived" | "fileKeys">>,
+    Partial<
+      Pick<CampaignPlan, "pruned" | "underspecified" | "filesetCheckSkipped" | "alreadyMerged" | "waived" | "fileKeys" | "fileOverlap">
+    >,
 ): string {
   const scheduled = plan.placements.length;
   const pruned = plan.pruned ?? [];
@@ -618,12 +642,17 @@ export function describePlan(
     lines.push(`  wave ${p.wave}  #${p.id}  — ${reasons.join("; ")}`);
   }
 
+  const allow = plan.fileOverlap === "allow";
+  const overlaps = allow ? unenforcedOverlaps(plan.waves, plan.fileKeys ?? {}) : [];
+  if (overlaps.length) lines.push("", ...overlaps);
+
   // How close the wave count is to the fewest possible, and which files hold it there:
   // the larger of the dependency depth and the largest file group (a file wins a tie).
+  // Under `allow` no file group holds a wave apart, so the bound is the dependency depth.
   if (scheduled) {
     const depth = dependencyDepth(plan.placements);
     const groups = fileGroups(plan.fileKeys ?? {}).filter((g) => g.tickets >= 2);
-    const top = groups[0];
+    const top = allow ? undefined : groups[0];
     const waves = (n: number) => `${n} wave${n === 1 ? "" : "s"}`;
     lines.push(
       "",
@@ -745,7 +774,10 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
   }
 
   const fileKeys = new Map(survivorPlan.placements.map((p) => [p.id, new Set(sets.get(p.id)?.files ?? [])]));
-  const partitioned = placeByCollisions(survivorPlan, uniqueOrder(ids), fileKeys);
+  // Under `allow` (ADR 0025) the waves are the dependency layering alone: file overlaps are
+  // reported, not enforced, and a collision is left to the merge-time retry.
+  const allow = deps.fileOverlap === "allow";
+  const partitioned = allow ? survivorPlan : placeByCollisions(survivorPlan, uniqueOrder(ids), fileKeys);
 
   const waived: Record<string, number> = {};
   for (const p of survivorPlan.placements) for (const k of sets.get(p.id)?.waived ?? []) waived[k] = (waived[k] ?? 0) + 1;
@@ -764,6 +796,7 @@ export async function planCampaign(ids: string[], deps: CampaignPlanDeps): Promi
     preWaiveFileKeys: Object.fromEntries(
       survivorPlan.placements.map((p) => [p.id, [...(sets.get(p.id)?.files ?? []), ...(sets.get(p.id)?.waived ?? [])]]),
     ),
+    ...(allow && { fileOverlap: "allow" as const }),
   };
 }
 
@@ -851,6 +884,8 @@ export interface CampaignPlanConfig {
   fileSet?: FileSetOf;
   /** the project's waived files — left out of collision checks via `waiveFileSet`. */
   waivedFiles?: string[];
+  /** the project's file-overlap mode (ADR 0025); absent reads as `strict`. */
+  fileOverlap?: FileOverlap;
 }
 
 /** The parsed `--on-underspecified` flag, if the caller passed one. */
@@ -967,6 +1002,7 @@ export async function runCampaignPlan(
       isTTY: deps.isTTY,
       ask: deps.ask,
     }),
+    fileOverlap: cfg.fileOverlap,
   });
 
   // A suggested --name from the area labels the selected issues span — the same

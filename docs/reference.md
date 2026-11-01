@@ -224,6 +224,9 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 Diagnostic rows — `gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
 sandbox setup, hook failures — are activity, not state: the reducer ignores them;
 the issue sheet and live tail read them.
+Among them, `finding-redacted` (`taskId`, `summary` — already scrubbed — and `redactions`, a count per
+env key or token kind) records that a harvested finding was scrubbed of secrets before triage; it
+never carries the matched text.
 
 **Park reasons** (design §2.3) — the one enum on the parked record, the `parked`
 event, and the dashboard: `question | stalled | conflict | red-base | crash | stopped | outdated-agent`.

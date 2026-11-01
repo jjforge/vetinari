@@ -1,12 +1,21 @@
 import { Refusal } from "./refusal.ts";
 import { gitRead } from "./git-read.ts";
-import { AGENT_PROVIDERS, nonResumableAnswerWarning, type AgentProviderName, type ResolvedConfig } from "./config.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import {
+  AGENT_PROVIDERS,
+  nonResumableAnswerWarning,
+  readEnvLikeSandcastle,
+  type AgentProviderName,
+  type ResolvedConfig,
+} from "./config.ts";
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
 import { UNASKED_PARK_REASONS, clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
 import { notice } from "./notice.ts";
-import { HARVEST_PROMPT, findingKey, parseFindings, triageFindings } from "./findings.ts";
+import { HARVEST_PROMPT, findingKey, parseFindings, scrubFinding, triageFindings } from "./findings.ts";
+import { hostSecretsPath, parseEnvFile } from "./registry.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event, readEventLog } from "./event-log.ts";
 import { withHostSlot, type HostCeiling } from "./lease.ts";
@@ -324,6 +333,20 @@ function notifyRepeatOffender(cfg: ResolvedConfig, taskId: string, ref: string) 
 }
 
 /**
+ * The known secrets a harvested finding is scrubbed of: every non-empty value in the project's
+ * `.env` (all of it reaches the container, read as the container reads it) and its `host.env`,
+ * named by env key. A missing file contributes nothing.
+ */
+function findingScrubSecrets(cfg: ResolvedConfig): { name: string; value: string }[] {
+  const base = resolve(process.cwd(), cfg.stateDir);
+  const read = (path: string, parse: (text: string) => Record<string, string>) =>
+    existsSync(path) ? Object.entries(parse(readFileSync(path, "utf8"))) : [];
+  return [...read(join(base, ".env"), readEnvLikeSandcastle), ...read(hostSecretsPath(base), parseEnvFile)]
+    .filter(([, value]) => value)
+    .map(([name, value]) => ({ name, value }));
+}
+
+/**
  * A run's last act, before the container is destroyed: ask the agent, on its own
  * live session, for any defect it noticed but did not fix, and file each through
  * the configured reporter. Fired on green and on the two stall parks (budget,
@@ -346,7 +369,12 @@ async function harvestFindings(
   if (!cfg.reportFinding || !sessionId) return;
   try {
     const hr = await sbx.run({ ...common, maxIterations: 1, resumeSession: sessionId, prompt: HARVEST_PROMPT });
-    const findings = parseFindings(hr.stdout ?? "");
+    const secrets = findingScrubSecrets(cfg);
+    const findings = parseFindings(hr.stdout ?? "").map((raw) => {
+      const { finding, redactions } = scrubFinding(raw, secrets);
+      if (Object.keys(redactions).length) cfg.log.log("finding-redacted", { taskId, summary: finding.summary, redactions });
+      return finding;
+    });
     cfg.log.log("findings", { taskId, count: findings.length });
     if (!findings.length) return;
 

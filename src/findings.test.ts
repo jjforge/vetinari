@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findingKey, findingSimilarity, parseFindings, reportFindings, triageFindings, type Finding } from "./findings.ts";
+import { findingKey, findingSimilarity, parseFindings, reportFindings, scrubFinding, triageFindings, type Finding } from "./findings.ts";
 
 test("parseFindings extracts each finding block with its sub-fields", () => {
   const stdout = `working... here is what I noticed.
@@ -153,4 +153,74 @@ test("triageFindings resolves with every finding's result when only the digest c
     ],
   );
   assert.deepEqual(failures, [{ error: "gh: comment rejected", digested: ["stale doc line"] }]);
+});
+
+test("scrubFinding redacts a known secret's exact value in every text field, by its env key, and counts it", () => {
+  const value = "sk-ant-abc123-the-provider-credential-xyz";
+  const secrets = [
+    { name: "ANTHROPIC_API_KEY", value },
+    { name: "SHORT", value: "hello" },
+  ];
+  const { finding, redactions } = scrubFinding(
+    { summary: `leaked ${value} in a hello log`, location: `config/${value}`, repro: `echo ${value}; echo hello`, severity: "P2" },
+    secrets,
+  );
+  assert.deepEqual(finding, {
+    summary: "leaked [redacted ANTHROPIC_API_KEY] in a hello log",
+    location: "config/[redacted ANTHROPIC_API_KEY]",
+    repro: "echo [redacted ANTHROPIC_API_KEY]; echo hello",
+    severity: "P2",
+  });
+  assert.deepEqual(redactions, { ANTHROPIC_API_KEY: 3 });
+});
+
+test("scrubFinding redacts each common token shape by kind, an Anthropic key as anthropic-key only, and a private-key block whole", () => {
+  const tail = "A1b2C3d4E5f6G7h8I9j0K1l2";
+  const pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\nabc/def+ghi==\n-----END RSA PRIVATE KEY-----";
+  const { finding, redactions } = scrubFinding(
+    {
+      summary: `keys: sk-ant-${tail} sk-${tail} ghp_${tail} github_pat_${tail}_x xoxb-123456-abcdef AKIAIOSFODNN7EXAMPLE`,
+      repro: `cat id_rsa:\n${pem}\ndone`,
+    },
+    [],
+  );
+  assert.equal(
+    finding.summary,
+    "keys: [redacted: anthropic-key] [redacted: openai-key] [redacted: github-token] [redacted: github-token] [redacted: slack-token] [redacted: aws-key]",
+  );
+  assert.equal(finding.repro, "cat id_rsa:\n[redacted: private-key]\ndone");
+  assert.deepEqual(redactions, {
+    "anthropic-key": 1,
+    "openai-key": 1,
+    "github-token": 2,
+    "slack-token": 1,
+    "aws-key": 1,
+    "private-key": 1,
+  });
+});
+
+test("scrubFinding leaves ordinary text alone but still catches a key after a space or a quote", () => {
+  const ordinary: Finding = {
+    summary: "the sk- prefix and a bare ghp_ prefix are documented",
+    location: "src/loop.ts",
+    repro: "open src/task-management-and-scheduling.ts",
+  };
+  assert.deepEqual(scrubFinding(ordinary, []), { finding: ordinary, redactions: {} });
+
+  const tail = "Zy9Xw8Vu7Ts6Rq5Po4Nm3Lk2";
+  const { finding, redactions } = scrubFinding({ summary: `key sk-proj-${tail}`, repro: `const k = "sk-${tail}";` }, []);
+  assert.equal(finding.summary, "key [redacted: openai-key]");
+  assert.equal(finding.repro, 'const k = "[redacted: openai-key]";');
+  assert.deepEqual(redactions, { "openai-key": 2 });
+});
+
+test("scrubFinding redacts a known value that contains another known value whole", () => {
+  const inner = "inner-secret-123";
+  const outer = `prefix-${inner}-suffix`;
+  const { finding, redactions } = scrubFinding({ summary: `saw ${outer} and ${inner}` }, [
+    { name: "INNER", value: inner },
+    { name: "OUTER", value: outer },
+  ]);
+  assert.equal(finding.summary, "saw [redacted OUTER] and [redacted INNER]");
+  assert.deepEqual(redactions, { OUTER: 1, INNER: 1 });
 });

@@ -87,27 +87,40 @@ const ref = (over: Partial<SendRef> = {}): SendRef => ({
 
 test("resolveReply returns the ref recorded for that (bot token, message id)", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, ref({ task: "640" }));
+  recordSend(index, { token: "botA", chat: "-1" }, 100, ref({ task: "640" }));
 
-  assert.deepEqual(resolveReply(index, "botA", 100), ref({ task: "640" }));
+  assert.deepEqual(resolveReply(index, { token: "botA", chat: "-1" }, 100), ref({ task: "640" }));
 });
 
 test("resolveReply disambiguates a shared bot by which message the reply targets", () => {
   const index = newReplyIndex();
   // Two projects share one bot token; each question is a distinct message id.
-  recordSend(index, "shared", 100, ref({ project: "alpha", task: "A1", baseLocation: "/a" }));
-  recordSend(index, "shared", 200, ref({ project: "beta", task: "B1", baseLocation: "/b" }));
+  recordSend(index, { token: "shared", chat: "-1" }, 100, ref({ project: "alpha", task: "A1", baseLocation: "/a" }));
+  recordSend(index, { token: "shared", chat: "-1" }, 200, ref({ project: "beta", task: "B1", baseLocation: "/b" }));
 
-  assert.equal(resolveReply(index, "shared", 100)?.project, "alpha");
-  assert.equal(resolveReply(index, "shared", 200)?.project, "beta");
+  assert.equal(resolveReply(index, { token: "shared", chat: "-1" }, 100)?.project, "alpha");
+  assert.equal(resolveReply(index, { token: "shared", chat: "-1" }, 200)?.project, "beta");
 });
 
 test("resolveReply returns null for a message id it never recorded", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, ref());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, ref());
 
-  assert.equal(resolveReply(index, "botA", 999), null);
-  assert.equal(resolveReply(index, "otherBot", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 999), null);
+  assert.equal(resolveReply(index, { token: "otherBot", chat: "-1" }, 100), null);
+});
+
+test("a reply in a destination chat routes to its own question, not one with the same message id in another chat", () => {
+  const index = newReplyIndex();
+  recordSend(index, { token: "shared", chat: "111" }, 42, ref({ project: "alpha", task: "A1", baseLocation: "/a" }));
+  recordSend(index, { token: "shared", chat: "-222" }, 42, ref({ project: "beta", task: "B1", baseLocation: "/b" }));
+  const conn = { token: "shared", chat: "111" };
+
+  const fromDest = routeReply(index, noPending(), conn, { text: "x", replyToId: 42, chat: "-222" });
+  const fromDefault = routeReply(index, noPending(), conn, { text: "x", replyToId: 42, chat: "111" });
+
+  assert.equal(fromDest.kind === "resume" && fromDest.ref.task, "B1");
+  assert.equal(fromDefault.kind === "resume" && fromDefault.ref.task, "A1");
 });
 
 test("pollTargets collapses projects sharing a bot to one connection per token", () => {
@@ -131,7 +144,17 @@ test("pollTargets gives a shared bot the union of its projects' allowed senders"
   ]);
 
   assert.deepEqual(targets[0].allowedSenders, new Set(["1", "2", "3"]));
-  assert.deepEqual(targets[1], { token: "solo", chat: "5" });
+  assert.deepEqual(targets[1], { token: "solo", chat: "5", chats: new Set(["5"]) });
+});
+
+test("pollTargets gives a shared bot the union of its projects' chats, default and destination", () => {
+  const targets = pollTargets([
+    project({ project: "alpha", conn: { token: "shared", chat: "111" }, destinations: { ops: { chat: "-222" } } }),
+    project({ project: "beta", conn: { token: "shared", chat: "555" } }),
+  ]);
+
+  assert.equal(targets.length, 1);
+  assert.deepEqual(targets[0].chats, new Set(["111", "-222", "555"]));
 });
 
 test("groupChatAllowlistWarnings names each project with a group chat and no allowlist on its bot", () => {
@@ -248,7 +271,11 @@ test("rebuildIndex adds no index entry for a `stopped` record that carries a tgM
   ];
   const index = rebuildIndex(projects);
 
-  assert.equal(resolveReply(index, "botA", 100), null, "a stopped record is not re-indexed, so a reply to it routes nowhere");
+  assert.equal(
+    resolveReply(index, { token: "botA", chat: "-1" }, 100),
+    null,
+    "a stopped record is not re-indexed, so a reply to it routes nowhere",
+  );
 });
 
 test("an `outdated-agent` record is neither announced nor re-indexed — the campaign notice is its announcement (#444)", () => {
@@ -273,7 +300,7 @@ test("an `outdated-agent` record is neither announced nor re-indexed — the cam
       parked: [parked({ taskId: "A2", reason: "outdated-agent", parkedAt: "t1", tgMessageId: 100 })],
     }),
   ]);
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
 });
 
 test("pendingAnnouncements skips a project with no destination to announce to", () => {
@@ -285,7 +312,13 @@ test("pendingAnnouncements skips a project with no destination to announce to", 
 test("pendingAnnouncements skips a record already announced this session via the index", () => {
   const index = newReplyIndex();
   const rec = parked({ taskId: "A1", parkedAt: "t1" });
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, { token: "botA", chat: "-1" }, 100, {
+    project: "alpha",
+    task: "A1",
+    projectRoot: "/r",
+    baseLocation: "/b",
+    parkedAt: "t1",
+  });
 
   const pend = pendingAnnouncements([project({ project: "alpha", parked: [rec] })], index);
 
@@ -303,9 +336,29 @@ test("rebuildIndex re-announces nothing but still routes a reply to a persisted 
   const index = rebuildIndex(projects);
 
   assert.deepEqual(pendingAnnouncements(projects, index), []);
-  const routed = resolveReply(index, "botA", 100);
+  const routed = resolveReply(index, { token: "botA", chat: "-1" }, 100);
   assert.equal(routed?.project, "alpha");
   assert.equal(routed?.task, "A1");
+});
+
+test("rebuildIndex keys a persisted question by the chat its `question` routing announced it in", () => {
+  const projects = [
+    project({
+      project: "alpha",
+      conn: { token: "botA", chat: "111" },
+      notify: { question: "asks" },
+      destinations: { asks: { chat: "-222" } },
+      parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })],
+    }),
+  ];
+  const index = rebuildIndex(projects);
+  const conn = { token: "botA", chat: "111" };
+
+  const fromDest = routeReply(index, noPending(), conn, { text: "x", replyToId: 100, chat: "-222" });
+  const fromDefault = routeReply(index, noPending(), conn, { text: "x", replyToId: 100, chat: "111" });
+
+  assert.equal(fromDest.kind === "resume" && fromDest.ref.task, "A1");
+  assert.equal(fromDefault.kind, "unrouted");
 });
 
 // --- reconcileReplyIndex: the running index never holds more than a restart would rebuild (#587) ---
@@ -316,92 +369,92 @@ const alpha = (over: Partial<GatewayProject> = {}): GatewayProject =>
 
 test("reconcileReplyIndex evicts a question whose parked record is gone", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [alpha({ parked: [] })]);
 
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
   assert.equal(index.announced.size, 0);
 });
 
 test("reconcileReplyIndex evicts the old message and announced key of a re-parked record", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef({ parkedAt: "t1" }));
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef({ parkedAt: "t1" }));
 
   reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t2" })] })]);
 
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
   assert.equal(index.announced.has("alpha\0A1\0t1"), false);
 });
 
 test("reconcileReplyIndex keeps a live question whose record carries the matching message id", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })] })]);
 
-  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.deepEqual(resolveReply(index, { token: "botA", chat: "-1" }, 100), alphaRef());
   assert.equal(index.announced.has("alpha\0A1\0t1"), true);
 });
 
 test("reconcileReplyIndex evicts an entry whose record is stamped with a different message id", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 200 })] })]);
 
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
 });
 
 test("reconcileReplyIndex keeps the question just announced against the set loaded before the announce", () => {
   const loadedBeforeAnnounce = [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1" })] })];
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, loadedBeforeAnnounce);
 
-  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.deepEqual(resolveReply(index, { token: "botA", chat: "-1" }, 100), alphaRef());
   assert.equal(index.announced.has("alpha\0A1\0t1"), true);
   assert.deepEqual(pendingAnnouncements(loadedBeforeAnnounce, index), [], "and is not re-announced next tick");
 });
 
 test("reconcileReplyIndex leaves every entry of a project absent from the loaded set", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [project({ project: "beta", parked: [] })]);
 
-  assert.deepEqual(resolveReply(index, "botA", 100), alphaRef());
+  assert.deepEqual(resolveReply(index, { token: "botA", chat: "-1" }, 100), alphaRef());
   assert.equal(index.announced.has("alpha\0A1\0t1"), true);
 });
 
 test("reconcileReplyIndex evicts an entry under a token other than the project's current conn", () => {
   const index = newReplyIndex();
-  recordSend(index, "botOld", 100, alphaRef());
+  recordSend(index, { token: "botOld", chat: "-1" }, 100, alphaRef());
   const record = parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 });
 
   reconcileReplyIndex(index, [alpha({ conn: { token: "botNew", chat: "-1" }, parked: [record] })]);
 
-  assert.equal(resolveReply(index, "botOld", 100), null);
+  assert.equal(resolveReply(index, { token: "botOld", chat: "-1" }, 100), null);
 });
 
 test("reconcileReplyIndex evicts every entry of a loaded project with no conn", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [alpha({ conn: undefined, parked: [parked({ taskId: "A1", parkedAt: "t1", tgMessageId: 100 })] })]);
 
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
   assert.equal(index.announced.size, 0);
 });
 
 test("reconcileReplyIndex drops an entry for a record whose reason is never asked, as rebuildIndex does", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef());
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef());
 
   reconcileReplyIndex(index, [alpha({ parked: [parked({ taskId: "A1", parkedAt: "t1", reason: "stopped", tgMessageId: 100 })] })]);
 
-  assert.equal(resolveReply(index, "botA", 100), null);
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null);
 });
 
 test("reconcileReplyIndex over a fully stamped set yields exactly what rebuildIndex builds", () => {
@@ -417,13 +470,13 @@ test("reconcileReplyIndex over a fully stamped set yields exactly what rebuildIn
     project({ project: "gamma", conn: undefined, parked: [parked({ taskId: "C1", parkedAt: "t1", tgMessageId: 300 })] }),
   ];
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef()); // live
-  recordSend(index, "botA", 101, alphaRef({ task: "A2", parkedAt: "t2" })); // re-parked since
-  recordSend(index, "botA", 102, alphaRef({ task: "A2", parkedAt: "t3" })); // live, re-announced
-  recordSend(index, "botA", 104, alphaRef({ task: "A9" })); // answered and gone
-  recordSend(index, "botB", 100, ref({ project: "beta", task: "B1", parkedAt: "t1" })); // live
-  recordSend(index, "botOld", 99, ref({ project: "beta", task: "B1", parkedAt: "t0" })); // old token, old park
-  recordSend(index, "botC", 300, ref({ project: "gamma", task: "C1", parkedAt: "t1" })); // conn removed
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef()); // live
+  recordSend(index, { token: "botA", chat: "-1" }, 101, alphaRef({ task: "A2", parkedAt: "t2" })); // re-parked since
+  recordSend(index, { token: "botA", chat: "-1" }, 102, alphaRef({ task: "A2", parkedAt: "t3" })); // live, re-announced
+  recordSend(index, { token: "botA", chat: "-1" }, 104, alphaRef({ task: "A9" })); // answered and gone
+  recordSend(index, { token: "botB", chat: "-2" }, 100, ref({ project: "beta", task: "B1", parkedAt: "t1" })); // live
+  recordSend(index, { token: "botOld", chat: "-1" }, 99, ref({ project: "beta", task: "B1", parkedAt: "t0" })); // old token, old park
+  recordSend(index, { token: "botC", chat: "-1" }, 300, ref({ project: "gamma", task: "C1", parkedAt: "t1" })); // conn removed
 
   reconcileReplyIndex(index, projects);
 
@@ -446,12 +499,12 @@ test("announceTick evicts a question whose parked record is gone and keeps the o
     }),
   ];
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, alphaRef({ task: "A9" })); // answered and gone
+  recordSend(index, { token: "botA", chat: "-1" }, 100, alphaRef({ task: "A9" })); // answered and gone
 
   await announceTick(projects, index, memoryLogger());
 
-  assert.equal(resolveReply(index, "botA", 100), null, "the gone question is evicted");
-  assert.equal(resolveReply(index, "botA", 200)?.task, "A1", "the question announced this tick still resolves");
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null, "the gone question is evicted");
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 200)?.task, "A1", "the question announced this tick still resolves");
 });
 
 test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {
@@ -503,7 +556,7 @@ const noPending = () => newPendingConfirms(() => 0);
 
 test("routeReply routes a reply-to-question message to a resume of that task", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, conn, 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
   const action = routeReply(index, noPending(), conn, { text: "use approach B", replyToId: 100 });
 
@@ -520,7 +573,7 @@ test("routeReply treats a /status message as a status query, not an answer", () 
 
 test("routeReply routes a prune command to a prune action, not a resume", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, conn, 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
   const action = routeReply(index, noPending(), conn, { text: "prune jjforge 640" });
 
@@ -530,7 +583,7 @@ test("routeReply routes a prune command to a prune action, not a resume", () => 
 
 test("routeReply routes a yes replying to a live preview to a confirm of that prune", () => {
   const pending = noPending();
-  pending.record("botA", 500, pendingConfirm({ issue: "640" }));
+  pending.record(conn, 500, pendingConfirm({ issue: "640" }));
 
   const action = routeReply(newReplyIndex(), pending, conn, { text: "yes", replyToId: 500 });
 
@@ -546,7 +599,7 @@ test("routeReply leaves a stray yes with nothing pending unrouted", () => {
 
 test("routeReply resumes a task answered with the word yes when no prune is pending", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, conn, 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
   // A `yes` replying to a parked question — not a preview — answers that task.
   const action = routeReply(index, noPending(), conn, { text: "yes", replyToId: 100 });
@@ -564,7 +617,7 @@ test("routeReply leaves a reply that matches no question unrouted", () => {
 
 test("routeReply leaves a plain (non-reply) message unrouted — a shared bot needs the reply target", () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, conn, 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
 
   const action = routeReply(index, noPending(), conn, { text: "yes" });
 
@@ -573,8 +626,8 @@ test("routeReply leaves a plain (non-reply) message unrouted — a shared bot ne
 
 test("pollLoop drives exactly one resume of the right task from one fake reply", async () => {
   const index = newReplyIndex();
-  recordSend(index, "botA", 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
-  recordSend(index, "botA", 200, { project: "alpha", task: "A2", projectRoot: "/r", baseLocation: "/b", parkedAt: "t2" });
+  recordSend(index, conn, 100, { project: "alpha", task: "A1", projectRoot: "/r", baseLocation: "/b", parkedAt: "t1" });
+  recordSend(index, conn, 200, { project: "alpha", task: "A2", projectRoot: "/r", baseLocation: "/b", parkedAt: "t2" });
 
   const resumes: Array<{ task: string; text: string }> = [];
   // The injected poller yields one reply (to A1's question), then signals stop.
@@ -604,6 +657,20 @@ test("liveAllowlistPoll applies an edited allowlist on the next poll of a runnin
   assert.deepEqual(seen, [new Set(["1"]), new Set(["1", "2"])]);
 });
 
+test("liveAllowlistPoll hears a destination added to a running bot on the next poll", async () => {
+  let projects = [project({ conn: { token: "botA", chat: "-100" } })];
+  const seen: Array<ReadonlySet<string> | undefined> = [];
+  const poll = async (c: TgConn, offset: number) => {
+    seen.push(c.chats);
+    if (seen.length === 1) projects = [project({ conn: { token: "botA", chat: "-100" }, destinations: { ops: { chat: "-222" } } })];
+    return seen.length < 2 ? { offset: offset + 1, messages: [] } : null;
+  };
+
+  await pollLoop(conn, newReplyIndex(), noPending(), { poll: liveAllowlistPoll(() => projects, poll), resume: () => {} });
+
+  assert.deepEqual(seen, [new Set(["-100"]), new Set(["-100", "-222"])]);
+});
+
 test("pollLoop hands a /status message to the injected status handler, not resume", async () => {
   let statusCalls = 0;
   let resumeCalls = 0;
@@ -626,9 +693,30 @@ test("pollLoop hands a /status message to the injected status handler, not resum
   assert.equal(resumeCalls, 0);
 });
 
+test("pollLoop answers a message from another chat on the bot in that chat", async () => {
+  const pollConn: TgConn = { token: "botA", chat: "111" };
+  const answeredIn: string[] = [];
+  let served = false;
+  const poll = async () => {
+    if (served) return null;
+    served = true;
+    return { offset: 1, messages: [{ text: "/status", chat: "-222" }] };
+  };
+
+  await pollLoop(pollConn, newReplyIndex(), noPending(), {
+    poll,
+    resume: () => {},
+    onStatus: (c) => {
+      answeredIn.push(c.chat);
+    },
+  });
+
+  assert.deepEqual(answeredIn, ["-222"]);
+});
+
 test("pollLoop hands a prune command to onPrune and a confirming yes to onConfirm", async () => {
   const pending = noPending();
-  pending.record("botA", 500, pendingConfirm({ issue: "640" }));
+  pending.record(conn, 500, pendingConfirm({ issue: "640" }));
   const prunes: Array<{ project?: string; issue: string }> = [];
   const confirms: PendingConfirm[] = [];
   let served = false;
@@ -1483,80 +1571,80 @@ const pendingConfirm = (over: Partial<PendingConfirm> = {}): PendingConfirm => (
 
 test("pendingConfirms records a preview and resolves a reply to it", () => {
   const store = newPendingConfirms(() => 0);
-  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm({ issue: "640" }));
 
-  assert.deepEqual(store.resolve("botA", 100), pendingConfirm({ issue: "640" }));
+  assert.deepEqual(store.resolve({ token: "botA", chat: "-1" }, 100), pendingConfirm({ issue: "640" }));
 });
 
 test("pendingConfirms returns null for a yes with nothing pending", () => {
   const store = newPendingConfirms(() => 0);
-  store.record("botA", 100, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm());
 
-  assert.equal(store.resolve("botA", 999), null, "a reply to a message with no pending confirm is ignored");
-  assert.equal(store.resolve("otherBot", 100), null, "another bot's message id does not match");
+  assert.equal(store.resolve({ token: "botA", chat: "-1" }, 999), null, "a reply to a message with no pending confirm is ignored");
+  assert.equal(store.resolve({ token: "otherBot", chat: "-1" }, 100), null, "another bot's message id does not match");
 });
 
 test("pendingConfirms is one-shot — a confirm resolves at most once", () => {
   const store = newPendingConfirms(() => 0);
-  store.record("botA", 100, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm());
 
-  assert.ok(store.resolve("botA", 100), "first yes resolves");
-  assert.equal(store.resolve("botA", 100), null, "a second yes to the same preview is ignored");
+  assert.ok(store.resolve({ token: "botA", chat: "-1" }, 100), "first yes resolves");
+  assert.equal(store.resolve({ token: "botA", chat: "-1" }, 100), null, "a second yes to the same preview is ignored");
 });
 
 test("pendingConfirms drops a confirmation older than its TTL", () => {
   let clock = 0;
   const store = newPendingConfirms(() => clock, 60_000);
-  store.record("botA", 100, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm());
 
   clock = 60_001; // past the TTL
-  assert.equal(store.resolve("botA", 100), null, "an expired confirmation is not honored");
+  assert.equal(store.resolve({ token: "botA", chat: "-1" }, 100), null, "an expired confirmation is not honored");
 });
 
 test("pendingConfirms sweeps an unanswered, expired preview on the next record", () => {
   let clock = 0;
   const store = newPendingConfirms(() => clock, 60_000);
-  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm({ issue: "640" }));
 
   clock = 60_001; // past the first preview's TTL; nobody replied
-  store.record("botA", 101, pendingConfirm({ issue: "641" }));
+  store.record({ token: "botA", chat: "-1" }, 101, pendingConfirm({ issue: "641" }));
 
   assert.equal(store.size(), 1, "the expired preview is no longer held");
-  assert.deepEqual(store.resolve("botA", 101), pendingConfirm({ issue: "641" }));
+  assert.deepEqual(store.resolve({ token: "botA", chat: "-1" }, 101), pendingConfirm({ issue: "641" }));
 });
 
 test("pendingConfirms keeps a still-live preview when another is recorded", () => {
   let clock = 0;
   const store = newPendingConfirms(() => clock, 60_000);
-  store.record("botA", 100, pendingConfirm({ issue: "640" }));
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm({ issue: "640" }));
 
   clock = 30_000; // the first preview is still live
-  store.record("botA", 101, pendingConfirm({ issue: "641" }));
+  store.record({ token: "botA", chat: "-1" }, 101, pendingConfirm({ issue: "641" }));
 
   assert.equal(store.size(), 2, "a live preview survives the sweep");
-  assert.deepEqual(store.resolve("botA", 100), pendingConfirm({ issue: "640" }));
-  assert.deepEqual(store.resolve("botA", 101), pendingConfirm({ issue: "641" }));
+  assert.deepEqual(store.resolve({ token: "botA", chat: "-1" }, 100), pendingConfirm({ issue: "640" }));
+  assert.deepEqual(store.resolve({ token: "botA", chat: "-1" }, 101), pendingConfirm({ issue: "641" }));
 });
 
 test("pendingConfirms sweeps a preview whose expiry is exactly now", () => {
   let clock = 0;
   const store = newPendingConfirms(() => clock, 60_000);
-  store.record("botA", 100, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm());
 
   clock = 60_000; // exactly at expiry — no longer live
-  store.record("botA", 101, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 101, pendingConfirm());
 
   assert.equal(store.size(), 1, "an entry expiring at now() is swept");
-  assert.equal(store.resolve("botA", 100), null);
+  assert.equal(store.resolve({ token: "botA", chat: "-1" }, 100), null);
 });
 
 test("pendingConfirms holds one fewer entry once a confirm is resolved", () => {
   const store = newPendingConfirms(() => 0);
-  store.record("botA", 100, pendingConfirm());
-  store.record("botA", 101, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 100, pendingConfirm());
+  store.record({ token: "botA", chat: "-1" }, 101, pendingConfirm());
   assert.equal(store.size(), 2);
 
-  store.resolve("botA", 100);
+  store.resolve({ token: "botA", chat: "-1" }, 100);
   assert.equal(store.size(), 1, "resolve consumes the entry it answers");
 });
 
@@ -1606,7 +1694,7 @@ test("handlePruneCommand previews the closure and records a pending confirm keye
   assert.match(confirm, /Reply "yes" to this message to prune\./, "the confirm instruction is the tail");
   assert.doesNotMatch(sends[0].text, /^would drop/, "it no longer leads with the child's raw stdout");
   // The preview's message id (500, the first send) carries the pending confirm.
-  assert.deepEqual(pending.resolve("botA", 500)?.issue, "640");
+  assert.deepEqual(pending.resolve({ token: "botA", chat: "-1" }, 500)?.issue, "640");
 });
 
 test("handlePruneCommand rejects an ambiguous prune with the candidate list and records nothing", async () => {
@@ -1623,7 +1711,7 @@ test("handlePruneCommand rejects an ambiguous prune with the candidate list and 
   assert.match(sends[0].text, /alpha/);
   assert.match(sends[0].text, /beta/);
   assert.match(sends[0].text, /prune (alpha|beta) 640/, "tells the user how to disambiguate");
-  assert.equal(pending.resolve("botA", 500), null, "nothing is left pending");
+  assert.equal(pending.resolve({ token: "botA", chat: "-1" }, 500), null, "nothing is left pending");
 });
 
 test("handlePruneCommand rejects when nothing is running and records nothing", async () => {
@@ -1635,7 +1723,7 @@ test("handlePruneCommand rejects when nothing is running and records nothing", a
   assert.equal(previews.length, 0);
   assert.equal(sends.length, 1);
   assert.match(sends[0].text, /nothing (is )?running|no campaign/i);
-  assert.equal(pending.resolve("botA", 500), null);
+  assert.equal(pending.resolve({ token: "botA", chat: "-1" }, 500), null);
 });
 
 // --- Outbox drain-and-route (E4). Records live in a real tmp outbox so the drain

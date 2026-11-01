@@ -169,7 +169,7 @@ test("tgPoll in a group chat keeps only allowlisted senders and logs each refusa
       okResponse([msgUpdate(1, -222, "allowed", 333), msgUpdate(2, -222, "stranger", 444), msgUpdate(3, -222, "nobody")])) as typeof fetch,
     async () => {
       const r = await tgPoll({ token: "42:secret", chat: "-222", allowedSenders: new Set(["333"]) }, 0, logger);
-      assert.deepEqual(r.messages, [{ text: "allowed", replyToId: undefined, senderId: "333" }]);
+      assert.deepEqual(r.messages, [{ text: "allowed", replyToId: undefined, senderId: "333", chat: "-222" }]);
       assert.equal(r.offset, 4);
     },
   );
@@ -182,6 +182,32 @@ test("tgPoll in a group chat keeps only allowlisted senders and logs each refusa
     assert.equal("text" in row, false);
     assert.equal(JSON.stringify(row).includes("secret"), false);
   }
+});
+
+test("tgPoll keeps every chat in the connection's chats, gating each group chat by its allowlist", async () => {
+  const logger = memoryLogger();
+  await withFetch(
+    (async () =>
+      okResponse([
+        msgUpdate(1, 111, "default", 111),
+        msgUpdate(2, -222, "allowed", 333),
+        msgUpdate(3, -222, "stranger", 999),
+        msgUpdate(4, 444, "elsewhere", 444),
+      ])) as typeof fetch,
+    async () => {
+      const conn = { token: "42:secret", chat: "111", chats: new Set(["111", "-222"]), allowedSenders: new Set(["333"]) };
+      const r = await tgPoll(conn, 0, logger);
+      assert.deepEqual(r.messages, [
+        { text: "default", replyToId: undefined, senderId: "111", chat: "111" },
+        { text: "allowed", replyToId: undefined, senderId: "333", chat: "-222" },
+      ]);
+      assert.equal(r.offset, 5);
+    },
+  );
+  const rows = refusedRows(logger);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].chat, "-222");
+  assert.equal(rows[0].sender, "999");
 });
 
 test("tgPoll with no allowlist drops and logs every group-chat message", async () => {
@@ -201,7 +227,7 @@ test("tgPoll passes a private chat's message with or without an allowlist, carry
     const logger = memoryLogger();
     await withFetch((async () => okResponse([msgUpdate(1, 555, "hi", 555)])) as typeof fetch, async () => {
       const r = await tgPoll({ token: "42:secret", chat: "555", ...allowed }, 0, logger);
-      assert.deepEqual(r.messages, [{ text: "hi", replyToId: undefined, senderId: "555" }]);
+      assert.deepEqual(r.messages, [{ text: "hi", replyToId: undefined, senderId: "555", chat: "555" }]);
     });
     assert.equal(refusedRows(logger).length, 0);
   }

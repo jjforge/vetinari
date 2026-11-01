@@ -14,6 +14,11 @@ export interface TgConn {
    * Absent means none: a group chat's messages are all refused. A private chat needs no allowlist.
    */
   allowedSenders?: ReadonlySet<string>;
+  /**
+   * The chats a poll keeps — the gateway's poll target hears every chat its bot's projects use.
+   * Absent means only `chat`.
+   */
+  chats?: ReadonlySet<string>;
 }
 
 /**
@@ -146,13 +151,15 @@ const defaultPollBackoff = (conn: TgConn): PollBackoff => {
   return b;
 };
 
-export type TgMsg = { text: string; replyToId?: number; senderId?: string };
+/** A polled text message. `chat` is the chat it came from; absent means the poll connection's `chat`. */
+export type TgMsg = { text: string; replyToId?: number; senderId?: string; chat?: string };
 
 /** How long one `getUpdates` long-poll holds open, in seconds — also the gateway's poll-staleness unit. */
 export const TG_POLL_TIMEOUT_S = 50;
 
 /**
- * One long-poll cycle, text messages from the configured chat only.
+ * One long-poll cycle, text messages from the connection's `chats` only (just `chat` when absent),
+ * each tagged with the chat it came from.
  *
  * In a group chat (a negative chat id: group, supergroup or channel) only a sender in the
  * connection's `allowedSenders` gets through; anyone else — or a message with no sender — is
@@ -194,14 +201,14 @@ export async function tgPoll(
     offset = u.update_id + 1;
     const m = u.message;
     if (!m?.text) continue;
-    if (String(m.chat?.id) !== String(conn.chat)) continue;
-    const chat = String(m.chat.id);
+    const chat = String(m.chat?.id);
+    if (!(conn.chats ?? new Set([String(conn.chat)])).has(chat)) continue;
     const senderId = m.from?.id != null ? String(m.from.id) : undefined;
     if (Number(chat) < 0 && !(senderId && conn.allowedSenders?.has(senderId))) {
       logger.log("telegram-sender-refused", { bot: botId(conn), chat, sender: senderId });
       continue;
     }
-    messages.push({ text: m.text as string, replyToId: m.reply_to_message?.message_id, senderId });
+    messages.push({ text: m.text as string, replyToId: m.reply_to_message?.message_id, senderId, chat });
   }
   return { offset, messages };
 }

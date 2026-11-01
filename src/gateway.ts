@@ -165,18 +165,26 @@ export function resolvePruneTarget(candidates: PruneCandidate[], conn: TgConn, p
  * The distinct bot connections to poll — one per token. Telegram allows exactly
  * one consumer per bot, so projects sharing a token collapse to a single poll
  * loop; a project with no connection is skipped. The first connection seen for a
- * token wins (any chat on that bot yields the same update stream), carrying the
- * union of every one of that token's projects' allowed senders — which project a
- * message belongs to is only known after routing, so a shared bot shares its allowlist.
+ * token is the target, carrying in `chats` every chat that token's projects use —
+ * each default chat and every named destination's — since a poll keeps only the
+ * chats it is given, and the union of every one of that token's projects' allowed
+ * senders — which project a message belongs to is only known after routing, so a
+ * shared bot shares its allowlist.
  */
 export function pollTargets(projects: GatewayProject[]): TgConn[] {
   const targets = new Map<string, TgConn>();
   for (const p of projects) {
     if (!p.conn) continue;
+    const projectChats = [p.conn.chat, ...Object.values(p.destinations ?? {}).map((d) => d.chat)];
     const first = targets.get(p.conn.token);
-    if (!first) targets.set(p.conn.token, p.conn);
-    else if (p.conn.allowedSenders)
-      targets.set(p.conn.token, { ...first, allowedSenders: new Set([...(first.allowedSenders ?? []), ...p.conn.allowedSenders]) });
+    if (!first) {
+      targets.set(p.conn.token, { ...p.conn, chats: new Set(projectChats) });
+      continue;
+    }
+    const allowedSenders = p.conn.allowedSenders
+      ? { allowedSenders: new Set([...(first.allowedSenders ?? []), ...p.conn.allowedSenders]) }
+      : {};
+    targets.set(p.conn.token, { ...first, ...allowedSenders, chats: new Set([...(first.chats ?? []), ...projectChats]) });
   }
   return [...targets.values()];
 }
@@ -235,7 +243,7 @@ export interface SendRef {
 }
 
 /**
- * The send-time index: `(botToken, messageId) → SendRef`, built as the gateway
+ * The send-time index: `(botToken, chat, messageId) → SendRef`, built as the gateway
  * announces each question and read to route an incoming reply. It is a cache
  * rebuilt on startup from persisted parked records (which carry their announced
  * message id), so it holds no durable state of its own — parked records remain
@@ -251,20 +259,21 @@ export interface ReplyIndex {
 
 export const newReplyIndex = (): ReplyIndex => ({ byMessage: new Map(), announced: new Set() });
 
-// NUL-joined keys: a bot token and a message id cannot collide across projects
-// that share a bot, because the message id is unique per bot.
-const messageKey = (token: string, messageId: number) => `${token}\0${messageId}`;
+// NUL-joined keys: a Telegram message id is unique only within a chat, so a reply
+// is keyed by bot token, chat and message id — two chats heard on one bot (a
+// shared bot, a separate `question` destination) cannot collide.
+const messageKey = (conn: Pick<TgConn, "token" | "chat">, messageId: number) => `${conn.token}\0${conn.chat}\0${messageId}`;
 const announceKey = (project: string, task: string, parkedAt: string) => `${project}\0${task}\0${parkedAt}`;
 
-/** Record that a question for `ref` was announced as `messageId` on `token`. */
-export function recordSend(index: ReplyIndex, token: string, messageId: number, ref: SendRef): void {
-  index.byMessage.set(messageKey(token, messageId), ref);
+/** Record that a question for `ref` was announced as `messageId` in `conn`'s chat on its bot. */
+export function recordSend(index: ReplyIndex, conn: Pick<TgConn, "token" | "chat">, messageId: number, ref: SendRef): void {
+  index.byMessage.set(messageKey(conn, messageId), ref);
   index.announced.add(announceKey(ref.project, ref.task, ref.parkedAt));
 }
 
 /** The project+task a reply belongs to, or null when no question matches it. */
-export function resolveReply(index: ReplyIndex, token: string, messageId: number): SendRef | null {
-  return index.byMessage.get(messageKey(token, messageId)) ?? null;
+export function resolveReply(index: ReplyIndex, conn: Pick<TgConn, "token" | "chat">, messageId: number): SendRef | null {
+  return index.byMessage.get(messageKey(conn, messageId)) ?? null;
 }
 
 const isAnnounced = (index: ReplyIndex, project: string, task: string, parkedAt: string) =>
@@ -288,9 +297,8 @@ export function reconcileReplyIndex(index: ReplyIndex, projects: GatewayProject[
   for (const [key, ref] of index.byMessage) {
     const p = loaded.get(ref.project);
     if (!p) continue;
-    const sep = key.lastIndexOf("\0");
-    const token = key.slice(0, sep);
-    const messageId = Number(key.slice(sep + 1));
+    const [token, , id] = key.split("\0");
+    const messageId = Number(id);
     const record = recordFor(p, ref.task, ref.parkedAt);
     const live =
       p.conn?.token === token &&
@@ -332,8 +340,8 @@ export interface PendingConfirm {
  * the life of the daemon; `size` counts the entries currently held.
  */
 export interface PendingConfirms {
-  record(token: string, messageId: number, confirm: PendingConfirm): void;
-  resolve(token: string, messageId: number): PendingConfirm | null;
+  record(conn: Pick<TgConn, "token" | "chat">, messageId: number, confirm: PendingConfirm): void;
+  resolve(conn: Pick<TgConn, "token" | "chat">, messageId: number): PendingConfirm | null;
   size(): number;
 }
 
@@ -344,13 +352,13 @@ const CONFIRM_TTL_MS = 5 * 60 * 1000;
 export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TTL_MS): PendingConfirms {
   const entries = new Map<string, { confirm: PendingConfirm; expiresAt: number }>();
   return {
-    record(token, messageId, confirm) {
+    record(conn, messageId, confirm) {
       const at = now();
       for (const [key, entry] of entries) if (entry.expiresAt <= at) entries.delete(key);
-      entries.set(messageKey(token, messageId), { confirm, expiresAt: at + ttlMs });
+      entries.set(messageKey(conn, messageId), { confirm, expiresAt: at + ttlMs });
     },
-    resolve(token, messageId) {
-      const key = messageKey(token, messageId);
+    resolve(conn, messageId) {
+      const key = messageKey(conn, messageId);
       const entry = entries.get(key);
       if (!entry) return null;
       entries.delete(key); // one-shot: consumed whether or not it is still live
@@ -566,11 +574,13 @@ export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: Tg
     return { kind: "prune", command: payload };
   }
   if (msg.replyToId != null) {
+    // A reply is keyed by the chat it came from — absent means the poll connection's own chat.
+    const heardIn = { token: conn.token, chat: msg.chat ?? conn.chat };
     if (command?.kind === "confirm") {
-      const confirm = pending.resolve(conn.token, msg.replyToId);
+      const confirm = pending.resolve(heardIn, msg.replyToId);
       if (confirm) return { kind: "confirm", confirm };
     }
-    const ref = resolveReply(index, conn.token, msg.replyToId);
+    const ref = resolveReply(index, heardIn, msg.replyToId);
     if (ref) return { kind: "resume", ref, text: msg.text };
   }
   return { kind: "unrouted" };
@@ -647,7 +657,7 @@ export async function handlePruneCommand(
   }
   const messageId = await deps.send(conn, formatPrunePreview(p.project, command.issue, previewText));
   if (messageId == null) return; // send failed — nothing to confirm against, drop it
-  pending.record(conn.token, messageId, target);
+  pending.record(conn, messageId, target);
 }
 
 /**
@@ -838,7 +848,10 @@ export interface PollDeps {
  * Because Telegram allows exactly one consumer per bot, exactly one of these runs
  * per distinct token (see `pollTargets`). It never routes work itself — it maps
  * each message through `routeReply` and hands the decision to the injected seams,
- * so several answered tasks resume concurrently through `resume`. A throw while
+ * so several answered tasks resume concurrently through `resume`. The poll hears
+ * every chat its bot's projects use; a message from a chat other than `conn.chat`
+ * is handled on that chat, so `/status`, a prune reply or an unrouted notice lands
+ * where it was asked. A throw while
  * routing or handling one message is logged and skipped, so one bad message (or a
  * failing file read behind `/status`) never deafens the bot. Reports the offset it
  * reached after each batch (`onOffset`) and resolves with it, so a restarted loop
@@ -851,13 +864,15 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
     if (!r) return offset;
     offset = r.offset;
     for (const msg of r.messages) {
+      // A message from another chat on this bot is routed and answered in that chat (no thread).
+      const heardIn = msg.chat != null && msg.chat !== conn.chat ? { token: conn.token, chat: msg.chat } : conn;
       try {
-        const action = routeReply(index, pending, conn, msg);
+        const action = routeReply(index, pending, heardIn, msg);
         if (action.kind === "resume") deps.resume(action.ref, action.text);
-        else if (action.kind === "status") await deps.onStatus?.(conn);
-        else if (action.kind === "prune") await deps.onPrune?.(conn, action.command);
+        else if (action.kind === "status") await deps.onStatus?.(heardIn);
+        else if (action.kind === "prune") await deps.onPrune?.(heardIn, action.command);
         else if (action.kind === "confirm") await deps.onConfirm?.(action.confirm);
-        else await deps.onUnrouted?.(conn, msg);
+        else await deps.onUnrouted?.(heardIn, msg);
       } catch (e) {
         deps.logger?.log("gateway-handler-error", { bot: botId(conn), error: String(e) });
       }
@@ -867,15 +882,16 @@ export async function pollLoop(conn: TgConn, index: ReplyIndex, pending: Pending
 }
 
 /**
- * Wrap a loop's `poll` so each poll gates senders on its token's allowlist as it stands *now*:
- * the union across `projects()` (read fresh per poll, see `pollTargets`), not the one the loop
- * started with — so an edit to `VETINARI_TELEGRAM_ALLOWED_SENDERS`, or a project joining the bot
- * with its own list, applies on the next poll without restarting the loop.
+ * Wrap a loop's `poll` so each poll gates senders on its token's allowlist, and keeps its token's
+ * chats, as they stand *now*: the unions across `projects()` (read fresh per poll, see
+ * `pollTargets`), not the ones the loop started with — so an edit to
+ * `VETINARI_TELEGRAM_ALLOWED_SENDERS`, a new destination, or a project joining the bot applies on
+ * the next poll without restarting the loop.
  */
 export function liveAllowlistPoll(projects: () => GatewayProject[], poll: PollDeps["poll"]): PollDeps["poll"] {
   return (conn, offset) => {
     const live = pollTargets(projects()).find((t) => t.token === conn.token);
-    return poll({ ...conn, allowedSenders: live?.allowedSenders }, offset);
+    return poll({ ...conn, allowedSenders: live?.allowedSenders, chats: live?.chats }, offset);
   };
 }
 
@@ -942,13 +958,15 @@ export async function supervisePolls(
 export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
   const index = newReplyIndex();
   for (const p of projects) {
-    if (!p.conn) continue;
+    // Keyed by the chat the question was announced in — re-derived from the current `question` routing.
+    const conn = resolveQuestionConn(p);
+    if (!conn) continue;
     for (const record of p.parked) {
       // A `stopped`/`outdated-agent` record was never announced, so there is no reply to route back
       // to it — skip it on rebuild too, mirroring `pendingAnnouncements`.
       if (UNASKED_PARK_REASONS.has(record.reason)) continue;
       if (record.tgMessageId == null) continue;
-      recordSend(index, p.conn.token, record.tgMessageId, {
+      recordSend(index, conn, record.tgMessageId, {
         project: p.project,
         task: record.taskId,
         projectRoot: p.projectRoot,
@@ -1075,7 +1093,7 @@ async function announcePending(projects: GatewayProject[], index: ReplyIndex, lo
       continue;
     }
     setParkedMessageId(parkedDirOf(a.baseLocation), a.record.taskId, messageId);
-    recordSend(index, a.conn.token, messageId, {
+    recordSend(index, a.conn, messageId, {
       project: a.project,
       task: a.record.taskId,
       projectRoot: a.projectRoot,

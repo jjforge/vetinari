@@ -9,7 +9,7 @@ import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type Fr
 import { clearParked, clearParkedIn, listParkedIn, writeParkedRecord } from "./state.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { readEventLog } from "./event-log.ts";
-import { reduceCampaign } from "./dashboard-model.ts";
+import { reduceCampaign } from "./campaign-fold.ts";
 import type { PointerDrop } from "./registry.ts";
 import { normalize } from "./issue-id.ts";
 import { gitRead } from "./git-read.ts";

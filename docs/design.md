@@ -51,7 +51,7 @@ Components and the one job of each:
 | Campaign loop | run waves; integrate; enforce the wave gates; stop or continue; redrive | `modes.ts` |
 | Integrator | merge greens one by one; gate the merged base; post-merge hooks | `merge.ts` |
 | State store | event log, parked records, outbox, archive | `event-log.ts`, `state.ts`, `archive.ts` |
-| Reducer | event log → issue / wave / campaign / card state — one fold, used everywhere | `dashboard-model.ts` (`reduceCampaign`) |
+| Reducer | event log → issue / wave / campaign / card state — one fold, used everywhere | `campaign-fold.ts` (`reduceCampaign`) |
 | Host registry + lease | project pointers; the container-count lease | `registry.ts`, `host-slots.ts` |
 | Gateway | sole Telegram consumer and sender; routes replies and commands to projects | `gateway.ts`, `gateway-service.ts` |
 | Dashboard | HTTP over the registry; renders the reducer's output; actions shell the CLI | `dashboard-*.ts`, `status.ts` |

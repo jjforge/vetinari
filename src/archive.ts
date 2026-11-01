@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import type { ResolvedConfig } from "./config.ts";
-import { campaignSettled, campaignStarted } from "./dashboard-model.ts";
+import { campaignSettled, campaignStarted } from "./campaign-fold.ts";
 import { readEventLog, type OrchestratorEvent } from "./event-log.ts";
 import { clearSentOutbound } from "./state.ts";
 

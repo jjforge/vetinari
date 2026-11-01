@@ -859,7 +859,7 @@ async function failRun(s: RunState, err: any): Promise<Outcome> {
   const { cfg, taskId } = s;
   const detail = String(err?.message ?? err);
   // The agent CLI too old for the model (#444) is an environment fault, not the issue's: park it
-  // `outdated-agent` (rebuild, then redrive) instead of failing the run.
+  // `outdated-agent` (update the sandbox's agent CLI, then redrive) instead of failing the run.
   const outdated = s.selectedProvider && outdatedAgentLine(s.selectedProvider, detail);
   if (outdated) return await parkOutdatedAgent(s, outdated);
   cfg.log.log("failed", { taskId, detail });

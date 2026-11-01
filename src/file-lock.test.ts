@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { RECLAIM_GUARD_STALE_MS, withFileLockAsync, withFileLockSync } from "./file-lock.ts";
 
 const freshLock = () => join(mkdtempSync(join(tmpdir(), "vetinari-file-lock-")), "test.lock");
@@ -144,4 +146,53 @@ test("the async variant waits for a live holder and gives up with its could-not-
     /^Error: test: could not acquire lock/,
   );
   assert.equal(readFileSync(lock, "utf8"), `${LIVE}:token`);
+});
+
+const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));
+const FILE_LOCK = pathToFileURL(fileURLToPath(new URL("./file-lock.ts", import.meta.url))).href;
+
+// Each child waits at a start barrier, then loops sync acquisitions using the real
+// pidAlive. In its critical section it creates a sentinel exclusively: EEXIST means two
+// holders overlapped, and the child exits non-zero.
+const CHILD = `
+import { closeSync, existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { withFileLockSync } from ${JSON.stringify(FILE_LOCK)};
+const [dir, lock] = process.argv.slice(2);
+writeFileSync(join(dir, "ready." + process.pid), "");
+while (!existsSync(join(dir, "go"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+const sentinel = join(dir, "sentinel");
+for (let i = 0; i < 40; i++) {
+  withFileLockSync(lock, () => {
+    try {
+      closeSync(openSync(sentinel, "wx"));
+    } catch (e) {
+      console.error("two holders overlapped:", e.code);
+      process.exit(1);
+    }
+    unlinkSync(sentinel);
+  }, { retryMs: 1, maxAttempts: 5000, label: "child" });
+}
+`;
+
+test("several processes contending one lock, seeded with a dead holder's lock, never hold it at once", { timeout: 10_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-file-lock-procs-"));
+  const lock = join(dir, "test.lock");
+  const script = join(dir, "child.mts");
+  writeFileSync(script, CHILD);
+  const deadPid = spawnSync(process.execPath, ["-e", ""]).pid!;
+  writeFileSync(lock, `${deadPid}:crashed`);
+
+  const N = 5;
+  const children = Array.from({ length: N }, () => {
+    const child = spawn(TSX, [script, dir, lock], { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (d) => (stderr += d));
+    return new Promise<{ code: number | null; stderr: string }>((resolve) => child.on("exit", (code) => resolve({ code, stderr })));
+  });
+  while (readdirSync(dir).filter((f) => f.startsWith("ready.")).length < N) await new Promise((r) => setTimeout(r, 10));
+  writeFileSync(join(dir, "go"), "");
+
+  for (const { code, stderr } of await Promise.all(children)) assert.equal(code, 0, stderr);
+  assert.equal(existsSync(lock), false);
 });

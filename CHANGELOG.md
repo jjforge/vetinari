@@ -27,9 +27,14 @@ Within a milestone each bold section label appears at most once.
 **Bug fixes:**
 - [ops] A lock holder killed mid-write no longer wedges the host-slots or findings lock (a later run used to give up after about ten seconds), and two processes reclaiming a dead holder's lock can no longer both end up holding it; a lock's release now removes only its own lock (#569, #655).
 - [ops] The gateway's in-memory reply index no longer grows without bound: each announce tick drops questions whose parked record is gone or was re-parked, as a restart would (#587).
+- [user] A campaign member whose run could not be spawned, or whose stop handling threw, now fails with an `error(…)` outcome and frees its slot, instead of an unhandled rejection that killed the campaign mid-wave (#592).
+- [user] Pruning issues out of a live campaign's current wave no longer skips the next wave when those issues hadn't started yet. Members of the current wave that are already set to run are now reported as still running (in the CLI line, the prune notice, the dry-run closure's new `keptInFlight` list and the dashboard's prune confirm) rather than "dropped", and the `prune` event gains a `keepInFlight` marker so the plan replays the same way (#651).
 
 **Security:**
 - [ops] The dashboard's Content-Security-Policy no longer allows inline scripts or styles without a per-response nonce: every response carries a fresh nonce, every inline `<script>`/`<style>` the pages render carries it, and the no-JS project picker's dead inline `onchange` is gone — so an injected inline script can't run (#600).
+
+**Infrastructure:**
+- [internal] eslint now runs `no-floating-promises` and `no-misused-promises` in CI and the campaign gates, as `npm run lint` (#592).
 
 **Documentation:**
 - [user] The user guide, README and template Dockerfile now say that the `cursor-agent` and `opencode` CLIs are not in the shipped image: a project selecting `--agent cursor` or `--agent opencode` must add that CLI to its `vetinari/Dockerfile` and run `vetinari build` (#521).

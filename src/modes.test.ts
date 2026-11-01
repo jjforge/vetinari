@@ -443,6 +443,23 @@ test("build builds the image, then runs baseline by default, returning its resul
   assert.deepEqual(calls, ["build vetinari-myapp vetinari/Dockerfile", "baseline"]);
 });
 
+test("build refuses for a non-Docker sandbox, naming it, without building or running baseline", async () => {
+  const calls: string[] = [];
+  const cfg = { ...buildCfg(), sandbox: () => ({ name: "fake", env: {} }) } as unknown as ResolvedConfig;
+  await assert.rejects(
+    build(
+      cfg,
+      { baseline: true },
+      {
+        buildImage: async () => (calls.push("build"), 0),
+        baseline: async () => (calls.push("baseline"), true),
+      },
+    ),
+    (e: unknown) => e instanceof Refusal && /sandbox isn't Docker/.test(e.message) && /vetinari baseline/.test(e.message),
+  );
+  assert.deepEqual(calls, []);
+});
+
 test("build with --no-baseline builds only, skipping the probe", async () => {
   let baselineRan = false;
   const ok = await build(

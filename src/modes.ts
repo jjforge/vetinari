@@ -319,11 +319,16 @@ const defaultBuildDeps: BuildDeps = { buildImage: runBuildImage, baseline };
  * the project's Dockerfile, neither repeated on the CLI — then, unless
  * `--no-baseline` was passed (`opts.baseline === false`), prove it with the
  * baseline probe. Returns false on a build failure (baseline is skipped) or a
- * red baseline; the CLI maps that to a non-zero exit.
+ * red baseline; the CLI maps that to a non-zero exit. A configured `sandbox` provider
+ * has no image, so `build` refuses before running anything.
  */
 export async function build(cfg: ResolvedConfig, opts: { baseline: boolean }, deps: BuildDeps = defaultBuildDeps): Promise<boolean> {
-  const code = await deps.buildImage(cfg.image, DOCKERFILE);
-  cfg.log.log("build", { image: cfg.image, dockerfile: DOCKERFILE, exitCode: code });
+  if (cfg.sandbox)
+    throw new Refusal("this project's sandbox isn't Docker — there is no image to build; run `vetinari baseline` to check the gates.");
+  // loadConfig refuses a missing image when no `sandbox` is configured.
+  const image = cfg.image!;
+  const code = await deps.buildImage(image, DOCKERFILE);
+  cfg.log.log("build", { image, dockerfile: DOCKERFILE, exitCode: code });
   if (code !== 0) return false;
   if (!opts.baseline) return true;
   return deps.baseline(cfg);

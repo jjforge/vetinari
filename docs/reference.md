@@ -93,7 +93,8 @@ exported for custom wiring.
 | Field | Purpose |
 | --- | --- |
 | `project` | this project's name in the host registry, dashboard, and notices |
-| `image` | the agent image name — built from `vetinari/Dockerfile`, used by `build`/`baseline`/`run`/`campaign` alike |
+| `image` | the agent image name — built from `vetinari/Dockerfile`, used by `build`/`baseline`/`run`/`campaign` alike. Required unless `sandbox` is set |
+| `sandbox` | optional factory `(cfg, { mounts }) => SandboxProvider` building the sandcastle sandbox provider every agent turn, gate, `baseline` and integration gate runs in; `mounts` are this run's bind mounts (`mounts`, the worktrees dir, and a copilot agent run's Copilot directory). Default: the Docker provider for `image` with those mounts. With it set, `image` is optional, `build` refuses (there is no image to build), and the stale-image and mount-parent checks at `campaign`/`redrive`/`run`/`baseline` start are skipped. The host slot (`containerShare`, the host container ceiling) applies unchanged |
 | `baseBranch` | the branch merges land on (the base a campaign advances) |
 | `gates` | the test commands that decide green; `{ cmd, label?, when?, budgetSeconds?, perMerge? }` — `when` scopes a gate to branches that touched matching files; `budgetSeconds` is how long the gate should take, and a run over it (green or red) is flagged as a [slow gate](user-guide.md#where-you-see-things) — information only, never a verdict; `perMerge: true` also runs the gate on the base after each wave member's merge, and a red result undoes only that member's merge and retries it once like a merge conflict (then parks it `conflict`) instead of parking the whole wave `red-base` — flag a fast check, such as a typecheck or lint that compiles the tests (design §6) |
 | `setup` | commands run once per sandbox, before the agent starts (e.g. `npm ci`) |

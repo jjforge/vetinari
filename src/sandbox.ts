@@ -137,11 +137,19 @@ export function makeSandboxOptions(cfg: ResolvedConfig, taskId: string, agentTas
     // `.sandcastle/`, so all ephemeral state lives under one place (default
     // `.vetinari.local/`). Relative to the host repo (cwd), like the orchestrator's.
     stateDir: cfg.stateDir,
-    sandbox: docker({ imageName: cfg.image, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId) }),
+    sandbox: sandboxProvider(cfg, sandboxMounts(cfg, process.cwd(), agentTaskId)),
     hooks: cfg.setup?.length
       ? { sandbox: { onSandboxReady: cfg.setup.map((command) => ({ command, timeoutMs: cfg.setupTimeoutMs ?? 300_000 })) } }
       : undefined,
   };
+}
+
+/** The configured `sandbox` factory's provider, or by default Docker on `cfg.image`. */
+function sandboxProvider(cfg: ResolvedConfig, mounts: MountSpec[]): sandcastle.SandboxProvider {
+  if (cfg.sandbox) return cfg.sandbox(cfg, { mounts });
+  // loadConfig refuses a missing image without a factory; never fall through to sandcastle's default name.
+  if (!cfg.image) throw new Refusal(`no "image" configured — the Docker sandbox needs one (or set "sandbox")`);
+  return docker({ imageName: cfg.image, mounts });
 }
 
 /**

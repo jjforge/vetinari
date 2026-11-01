@@ -2293,6 +2293,24 @@ for (const [name, cmd] of startCommands) {
   });
 }
 
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} with a non-Docker sandbox skips the stale-image and mount-parent checks — no docker inspect, no stat container`, async () => {
+    const freshness = spy(STALE_IMAGE);
+    const probe = spy(new Map([["/home/agent/go", UID]]));
+    const sandbox = () => ({ name: "fake", env: {} });
+    const { deps, errored } = makeDeps({
+      cfg: { ...makeDeps().deps.cfg, sandbox, mounts: [goModMount] } as unknown as DispatchDeps["cfg"],
+      readImageFreshness: freshness as unknown as DispatchDeps["readImageFreshness"],
+      readMountParentOwners: probe as unknown as DispatchDeps["readMountParentOwners"],
+      expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"],
+    });
+    await dispatch(cmd, deps);
+    assert.deepEqual(freshness.calls, []);
+    assert.deepEqual(probe.calls, []);
+    assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
+  });
+}
+
 test("dispatch run proceeds silently when every mount parent is agent-owned in the image, probing each once (#512)", async () => {
   const probe = spy(
     new Map([

@@ -694,6 +694,67 @@ any minor bump:
    existing branch reuses that worktree**: together, what make park→answer
    survive a fresh process.
 
+## Backing up and restoring
+
+Some of vetinari's state is durable: nothing rebuilds it, so back it up. The rest
+is disposable: it is rebuilt or can be re-created. Paths are those of the
+[on-disk layout](reference.md#on-disk-layout).
+
+### Back up
+
+- **`.vetinari.local/parked/`** — the parked records, the source of truth for
+  parked work.
+- **`.vetinari.local/outbox/`** — notices not yet sent.
+- **`.vetinari.local/logs/orchestrator.jsonl`** and
+  **`.vetinari.local/logs/archive/`** — the event log the campaign state is
+  rebuilt from, and the run history.
+- **`.vetinari.local/copilot/`** — the Copilot session state a resume needs.
+- **The unmerged `agent/<id>` branches** in the project's git repo — agents' work
+  not yet merged. Back up the repo, or push them to a private remote.
+- **The host config dir's `max-concurrent-containers` file** — operator-set
+  config. Back it up, or re-create it by hand.
+
+**Keep the secrets elsewhere.** `.vetinari.local/.env` and
+`.vetinari.local/host.env` hold credentials: keep them in a password manager
+rather than in backups.
+
+**Already in git:** `vetinari/config.mts` and `vetinari/Dockerfile`.
+
+### Disposable
+
+These are rebuilt or re-created, so a backup can skip them:
+
+- the gate logs (`.vetinari.local/logs/gate-<ts>-<n>.log`), agent logs
+  (`.vetinari.local/logs/agent-<task>.log`), activity logs
+  (`.vetinari.local/logs/activity-<task>.jsonl`) and dashboard-action logs
+  (`.vetinari.local/logs/dashboard/`);
+- any host cache directories a project's `mounts` point at, such as
+  `.vetinari.local/cache/` in a Go project;
+- `.vetinari.local/worktrees/` — the agent worktrees, rebuilt from their
+  `agent/<id>` branches;
+- `.vetinari.local/routing.json` — re-materialized from the config;
+- the generated `.vetinari.local/tsconfig.json`;
+- the host config dir's registry — re-register the project (see below);
+- `<host config dir>/logs/host.jsonl` — the host diagnostics log.
+
+### Never restore
+
+Do not restore the lease files in `<host config dir>/slots/` (the `<pid>.json`
+leases and `.lock`), or the project lock files `.vetinari.local/findings.lock`
+and `.vetinari.local/parked/.lock`. They describe processes that no longer exist.
+
+### Restore
+
+With no campaign and no gateway running:
+
+1. Put the durable files back.
+2. If the registry was lost, re-register each project. Any project command that
+   loads the config (`run`, `campaign`, `baseline`, …) registers it, so the
+   `baseline` in step 4 does. `tidy` and `gateway` don't.
+3. Run `vetinari tidy` — a dry run first, then `vetinari tidy --apply`.
+4. Run `vetinari gateway restart`, then `vetinari baseline` in each project.
+5. Run `vetinari redrive` in each project where a campaign was parked.
+
 ## Reconciliation tools
 
 ### `tidy` — fold the drift a by-hand resolution leaks

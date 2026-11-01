@@ -389,8 +389,9 @@ const resumableCopilot = (base: AgentProvider, copilotDir: string): TurnSessionA
     buildPrintCommand(opts) {
       const cmd = base.buildPrintCommand(opts);
       unannounced = turnId = opts.resumeSession ?? randomUUID();
-      const flag = opts.resumeSession ? "--resume" : "--session-id";
-      return { ...cmd, command: `${cmd.command} ${flag} ${shellQuote(unannounced)}` };
+      // sandcastle's own copilot() already passes `--resume=<id>` for a resumed turn.
+      if (opts.resumeSession) return cmd;
+      return { ...cmd, command: `${cmd.command} --session-id ${shellQuote(unannounced)}` };
     },
     parseStreamLine(line) {
       const events = base.parseStreamLine(line);

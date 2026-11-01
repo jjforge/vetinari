@@ -821,7 +821,7 @@ test("a copilot turn cut off before its result event still resumes next turn wit
   const started = / --session-id '([^']+)'$/.exec(sbx.commands[0])?.[1];
   assert.ok(started, "turn 0 starts a session under a vetinari-chosen id");
   assert.equal(sbx.runCalls[1].resumeSession, started);
-  assert.match(sbx.commands[1], new RegExp(` --resume '${started}'$`));
+  assert.match(sbx.commands[1], new RegExp(` --resume='${started}'$`));
 });
 
 test("runLoop drives a non-resumable provider by a FRESH re-run each red turn — no resumeSession, no 'no session id' throw", async () => {

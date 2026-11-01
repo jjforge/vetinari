@@ -87,7 +87,7 @@ test("a fresh copilot turn starts a new session under a fresh --session-id uuid,
 
 test("a resumed copilot turn continues the session with --resume and passes no --session-id", () => {
   const command = copilotFor().buildPrintCommand({ prompt: "do it", dangerouslySkipPermissions: true, resumeSession: "abc" }).command;
-  assert.equal(command, "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --resume 'abc'");
+  assert.equal(command, "copilot -p 'do it' --output-format json --model 'auto' --allow-all-tools --resume='abc'");
   assert.doesNotMatch(command, /--session-id/);
 });
 

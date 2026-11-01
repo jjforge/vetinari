@@ -707,16 +707,25 @@ project old enough to need one, apply it by hand:
 ### Update `@ai-hero/sandcastle`
 
 > **Temporary fork pin.** `@ai-hero/sandcastle` is pinned to a fork,
-> `git+https://github.com/zachthieme/sandcastle.git`, at the `state-dir-prebuilt`
-> commit, for the `stateDir` option vetinari needs (it routes sandcastle's own
-> artifacts under `.vetinari.local/` instead of a stray `.sandcastle/`). That
-> branch carries a prebuilt `dist/`, because npm 11 blocks a dependency's
-> build-on-install scripts by default and a git install could not otherwise build
-> it. The change itself is upstream as
+> `git+https://github.com/zachthieme/sandcastle.git`, at a sync tag, for the
+> `stateDir` option vetinari needs (it routes sandcastle's own artifacts under
+> `.vetinari.local/` instead of a stray `.sandcastle/`). Each sync from upstream is
+> upstream `main` plus the `stateDir` commit plus a prebuilt `dist/` — npm 11 blocks
+> a dependency's build-on-install scripts by default, so a git install could not
+> otherwise build it — tagged `v<upstream version>-statedir.<n>`, `<n>` counting the
+> syncs on that upstream version. A tag, not a branch, is the pin, so every earlier
+> pin stays installable. The change itself is upstream as
 > [mattpocock/sandcastle#961](https://github.com/mattpocock/sandcastle/pull/961);
 > this pin is temporary, to be dropped for a published `@ai-hero/sandcastle` (the
 > flow below) once that PR lands in a release. The clean feature branch
 > (`configurable-state-dir`, what the PR tracks) carries no `dist/`.
+>
+> To sync: in a fork checkout, cherry-pick the `stateDir` commit onto upstream `main`
+> (re-threading `stateDir` through any new upstream code that hard-codes
+> `.sandcastle`), run sandcastle's `typecheck` and tests, then `npm run build` and
+> commit `dist/` (`git add -f dist`). Tag the result with the next
+> `-statedir.<n>`, push the tag, and point `package.json` at it. Then climb the four
+> rungs below.
 
 When on a published release, the dependency is pinned `^0.12.0`, so npm's caret
 allows patches only. sandcastle is pre-1.0, so a minor can carry behavioural

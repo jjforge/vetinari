@@ -26,6 +26,7 @@ import {
   writeParkedRecord,
 } from "./state.ts";
 import { memoryLogger } from "./log.ts";
+import { Refusal } from "./refusal.ts";
 import { withEnv } from "./test-support.ts";
 
 const cfgFor = (dir: string): ResolvedConfig =>
@@ -65,6 +66,43 @@ test("readParked returns the record and, by default, requires a sessionId to res
   const rec = readParked(cfgFor(dir), "101");
   assert.equal(rec.sessionId, "s");
   assert.equal(rec.question, "Need a choice.");
+});
+
+// A record torn by a power loss: zero bytes, truncated JSON, or a parse that is not an object.
+const TORN_RECORDS = ["", '{"taskId": "7", "reas', "null"];
+
+const assertRefusesTornRecord = (fn: () => unknown, path: string) =>
+  assert.throws(fn, (e: unknown) => {
+    assert.ok(e instanceof Refusal, `expected a Refusal, got ${String(e)}`);
+    assert.ok(e.message.includes(path), `the message names the record: ${e.message}`);
+    assert.ok(e.message.includes("vetinari redrive"), `the message names the campaign recovery: ${e.message}`);
+    assert.ok(e.message.includes("vetinari run 7"), `the message names the standalone recovery: ${e.message}`);
+    return true;
+  });
+
+const tornRecordDir = (content: string) => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-torn-record-"));
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  const path = join(dir, "parked", "7.json");
+  writeFileSync(path, content);
+  return { dir, path };
+};
+
+test("readParked refuses a torn record with a Refusal naming the file and the recovery, with or without requireSession", () => {
+  for (const content of TORN_RECORDS) {
+    const { dir, path } = tornRecordDir(content);
+    assertRefusesTornRecord(() => readParked(cfgFor(dir), "7"), path);
+    assertRefusesTornRecord(() => readParked(cfgFor(dir), "7", { requireSession: false }), path);
+  }
+});
+
+test("readParked on a missing record does not throw a Refusal", () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-read-missing-"));
+  mkdirSync(join(dir, "parked"), { recursive: true });
+  assert.throws(
+    () => readParked(cfgFor(dir), "7"),
+    (e: unknown) => !(e instanceof Refusal),
+  );
 });
 
 test("readParked throws by default when a record has no sessionId — a resumable resume cannot proceed", () => {
@@ -109,6 +147,32 @@ test("isAnswered is false for a record with no answer and for a missing record",
   parkFixture(dir, "606");
   assert.equal(isAnswered(cfgFor(dir), "606"), false, "a parked-but-unanswered record is not answered");
   assert.equal(isAnswered(cfgFor(dir), "999"), false, "a record that is not on disk is not answered");
+});
+
+test("isAnswered refuses a torn record with a Refusal naming the file and the recovery", () => {
+  for (const content of TORN_RECORDS) {
+    const { dir, path } = tornRecordDir(content);
+    assertRefusesTornRecord(() => isAnswered(cfgFor(dir), "7"), path);
+  }
+});
+
+test("answerParked refuses a torn record and writes nothing to it", () => {
+  for (const content of TORN_RECORDS) {
+    const { dir, path } = tornRecordDir(content);
+    assertRefusesTornRecord(() => answerParked(cfgFor(dir), "7", "use approach A"), path);
+    assert.equal(readFileSync(path, "utf8"), content, "the torn record's bytes are unchanged");
+  }
+});
+
+test("a torn record still exists for hasParked and a valid record without a session still throws a plain Error", () => {
+  const { dir } = tornRecordDir("");
+  assert.equal(hasParked(cfgFor(dir), "7"), true, "hasParked stays an existence check");
+
+  parkFixtureNoSession(dir, "101");
+  assert.throws(
+    () => readParked(cfgFor(dir), "101"),
+    (e: unknown) => e instanceof Error && !(e instanceof Refusal) && /no sessionId/.test(e.message),
+  );
 });
 
 test("clearParkedForTasks removes only parked records for completed wave tasks", () => {

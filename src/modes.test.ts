@@ -56,6 +56,7 @@ import {
 } from "./host-slots.ts";
 import { defaultPruneDeps, runPrune } from "./prune.ts";
 import { withEnv } from "./test-support.ts";
+import { Refusal } from "./refusal.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
 
@@ -1444,6 +1445,28 @@ test("redrive re-runs a parked member whose parked record is gone (a crash, no r
   assert.equal(ok, "done");
   assert.deepEqual(spawned, ["102"], "the recordless park re-ran — 101 was banked, not respawned");
   assert.deepEqual(regates, [false], "a question park is not re-gated");
+});
+
+test("redrive refuses a torn parked record before spawning anything, naming the record (#574)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-torn-"));
+  const cfg = harnessCfg(dir);
+  const host: HostBudget = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  seedParkedWave(cfg, "question");
+  // 102's record survived a power loss as zero bytes — a torn write, not a missing record.
+  mkdirSync(cfg.parkedDir, { recursive: true });
+  const record = join(cfg.parkedDir, "102.json");
+  writeFileSync(record, "");
+
+  const spawned: string[] = [];
+  const spawnRun: CampaignDeps["spawnRun"] = async (id) => {
+    spawned.push(id);
+    return 0;
+  };
+  await assert.rejects(
+    silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, gitFreeDeps(cfg, spawnRun))),
+    (e: unknown) => e instanceof Refusal && e.message.includes(record),
+  );
+  assert.deepEqual(spawned, [], "nothing spawned before the refusal");
 });
 
 test("reconcileResumeWave resumes a crashed member's session and runs the rest fresh (design §7)", () => {

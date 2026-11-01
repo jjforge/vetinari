@@ -243,3 +243,41 @@ test("stop: a failure shows the route's words in the dialog and restores both st
   assert.equal(button("Stop after this wave").disabled, false);
   assert.equal(page.window.location.href, "http://dashboard.test/beta");
 });
+
+// A campaign whose running wave holds issue 5, rendered with the prune control on.
+const pruneCampaign: CampaignStatus = {
+  project: "beta",
+  name: "checkout revamp",
+  waves: [{ index: 0, status: "running", issues: [{ issueNumber: "5", status: "running" }] }],
+  parked: [],
+};
+const prunePage = () => renderStatusPage(pruneCampaign, { prune: true, leaseLive: true });
+// Answer the issue sheet's detail fetch for issue 5 as a prunable running issue, and the prune
+// preview with `preview`.
+const pruneStub = (preview: object) => (call: { url: string }) =>
+  call.url === "/api/issue?project=beta&issue=5"
+    ? dashboardReply(200, JSON.stringify({ project: "beta", issueNumber: "5", status: "running", turns: 0, elapsedMs: 0, turnLog: [] }))
+    : call.url.startsWith("/prune?preview")
+      ? dashboardReply(200, JSON.stringify(preview))
+      : undefined;
+// Open issue 5's sheet by a real click on its wave-member row, then click Prune; returns the
+// confirm text (the span inside #prune-confirm — its own textContent carries the button labels).
+const previewPrune = async (page: DashboardDomPage) => {
+  page.document.querySelector<HTMLButtonElement>('button[data-issue="5"]')!.click();
+  await page.settle();
+  page.document.querySelector<HTMLButtonElement>("#prune-start")!.click();
+  await page.settle();
+  return page.document.querySelector<HTMLElement>("#prune-confirm span")!.textContent;
+};
+
+test("prune: a preview that drops nothing else but keeps in-flight members says so, never 'no dependents'", async (t) => {
+  const page = loadDashboardPage(t, prunePage(), pruneStub({ target: "5", dropped: ["5"], keptBanked: [], keptInFlight: ["101", "102"] }));
+  const text = await previewPrune(page);
+  assert.equal(page.calls.at(-1)?.url, "/prune?preview&taskId=5&project=beta");
+  assert.equal(text, "Prune #5 — drops nothing else. Still running in the current wave #101, #102");
+});
+
+test("prune: a preview that drops dependents names them, and the banked work it keeps", async (t) => {
+  const page = loadDashboardPage(t, prunePage(), pruneStub({ target: "5", dropped: ["5", "7"], keptBanked: ["3"], keptInFlight: [] }));
+  assert.equal(await previewPrune(page), "Prune #5 — also drops #7. Keeps banked (merged or mergeable) #3");
+});

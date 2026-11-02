@@ -25,6 +25,7 @@ Within a milestone each bold section label appears at most once.
 **Bug fixes:**
 - [ops] The changelog fold (`vetinari changelog collect`, and a campaign's per-wave fold) no longer adds entries to a release milestone dated the same day, or deletes a milestone's intro text: it adds only to a milestone of its own title dated today, and otherwise starts a new "Collected changes" milestone above it (#697).
 - [user] The dashboard's project page no longer answers `500 internal server error` when one of the project's archived runs predates `wave-start` naming its members; that run's closed waves simply show no time split (#702).
+- [user] `prune <issue>` of a **failed** issue now takes it out of the campaign, as the failure notice and the dashboard's Prune control advise. Before, the prune dropped only its dependents, and the next `redrive` retried the failed issue and failed again. A prune already logged against a failed issue now replays correctly too (#703).
 
 ### Collected changes — November 1, 2026
 

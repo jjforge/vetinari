@@ -85,3 +85,37 @@ export function readAgentOverride(env: NodeJS.ProcessEnv = process.env): ReturnT
 export function stampAgentOverride(over: Parameters<typeof encodeAgentOverride>[0], env: NodeJS.ProcessEnv = process.env): void {
   if (Object.keys(over).length) env[AGENT_ENV_VAR] = encodeAgentOverride(over);
 }
+
+/** A child `run`'s settled verdict, as the campaign deals in it: green, parked, or failed with its `detail`. */
+export type ChildVerdict = { kind: "green" } | { kind: "parked" } | { kind: "failed"; detail: string };
+
+/** How a child `run` ended: a verdict, or — killed by a signal under a stop — not yet one (#464). */
+export type ChildExit = ChildVerdict | { kind: "stopped"; signal: NodeJS.Signals };
+
+/** A failure's detail — `error(<cause>)`, the text a `failed` event carries. */
+export const failedVerdict = (cause: string | number): ChildVerdict => ({ kind: "failed", detail: `error(${cause})` });
+
+/**
+ * Decode a child `run`'s exit — its code, or the signal that killed it — by `run`'s contract: `0`
+ * green, `2` parked, any other code failed. A signal while the campaign is `halted` is `stopped`, for
+ * the campaign to settle (#464); otherwise it is a failure named by the signal.
+ */
+export function decodeChildExit(exit: number | NodeJS.Signals, halted: boolean): ChildExit {
+  if (typeof exit === "string") return halted ? { kind: "stopped", signal: exit } : failedVerdict(exit);
+  return exit === 0 ? { kind: "green" } : exit === 2 ? { kind: "parked" } : failedVerdict(exit);
+}
+
+/** A spawn or stop-handling that threw: that member's failure, carrying the error's message. */
+export function decodeChildRejection(err: unknown): ChildVerdict {
+  return failedVerdict(err instanceof Error ? err.message : String(err));
+}
+
+/** The campaign's outcome string for a verdict: `green`, `parked`, or the failure's `error(…)` detail. */
+export function verdictOutcome(verdict: ChildVerdict): string {
+  return verdict.kind === "failed" ? verdict.detail : verdict.kind;
+}
+
+/** Is this campaign outcome a failure — a member the agent could not make green, or whose merge failed? */
+export function isFailedOutcome(outcome: string | undefined): boolean {
+  return !!outcome?.startsWith("error");
+}

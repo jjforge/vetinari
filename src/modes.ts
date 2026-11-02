@@ -18,7 +18,18 @@ import {
   type MergeConflict,
 } from "./merge.ts";
 import { mergeConflictPrompt, perMergeCheckPrompt } from "./loop.ts";
-import { childStart, encodeChildStart, isJsonOutput, type ChildStart } from "./child-run.ts";
+import {
+  childStart,
+  decodeChildExit,
+  decodeChildRejection,
+  encodeChildStart,
+  failedVerdict,
+  isFailedOutcome,
+  isJsonOutput,
+  verdictOutcome,
+  type ChildStart,
+  type ChildVerdict,
+} from "./child-run.ts";
 import { defaultFileSet, hasFileSetMarker, ticketProse } from "./fileset.ts";
 import {
   UNASKED_PARK_REASONS,
@@ -422,16 +433,21 @@ export function warnIfTelegramUnconfigured(cfg: Pick<ResolvedConfig, "project" |
  * `parkStopped` would with no sandbox — the conventional branch, the session this spawn was
  * resuming, the signal as the `detail`.
  */
-async function stoppedRunOutcome(cfg: ResolvedConfig, taskId: string, signal: NodeJS.Signals, resumeSession?: string): Promise<string> {
+async function stoppedRunOutcome(
+  cfg: ResolvedConfig,
+  taskId: string,
+  signal: NodeJS.Signals,
+  resumeSession?: string,
+): Promise<ChildVerdict> {
   const events = readEventLog(cfg).filter((e) => "taskId" in e && e.taskId === taskId);
   const sinceSpawn = events.slice(events.findLastIndex((e) => e.event === "spawn") + 1);
   const verdict = sinceSpawn.findLast((e) => e.event === "green" || e.event === "parked" || e.event === "failed")?.event;
-  if (verdict === "green" || verdict === "parked") return verdict;
-  if (verdict === "failed") return `error(${signal})`;
+  if (verdict === "green" || verdict === "parked") return { kind: verdict };
+  if (verdict === "failed") return failedVerdict(signal);
   if (hasParked(cfg, taskId)) {
     const { reason, detail } = readParked(cfg, taskId, { requireSession: false });
     cfg.log.log("parked", { taskId, reason, ...(detail ? { detail } : {}) });
-    return "parked";
+    return { kind: "parked" };
   }
   await park(cfg, {
     taskId,
@@ -441,7 +457,7 @@ async function stoppedRunOutcome(cfg: ResolvedConfig, taskId: string, signal: No
     branch: `${cfg.branchPrefix}${taskId}`,
     question: "The run was stopped before it reached a verdict.",
   });
-  return "parked";
+  return { kind: "parked" };
 }
 
 /**
@@ -541,26 +557,21 @@ export async function queue(
           const resumeSession = readmitted.has(next) ? undefined : resumeSessions[next];
           const resumePrompt = readmitted.has(next) ? undefined : resumePrompts[next];
           spawnRun(next, childStart(resumeSession, resumePrompt))
-            .then((exit) =>
-              typeof exit === "string" && halted()
-                ? stoppedRunOutcome(cfg, next, exit, resumeSession)
-                : exit === 0
-                  ? "green"
-                  : exit === 2
-                    ? "parked"
-                    : `error(${exit})`,
-            )
+            .then((exit): ChildVerdict | Promise<ChildVerdict> => {
+              const ended = decodeChildExit(exit, halted());
+              return ended.kind === "stopped" ? stoppedRunOutcome(cfg, next, ended.signal, resumeSession) : ended;
+            })
             // A spawn or stop-handling that throws is that member's failure, not an unhandled
             // rejection: one would leave its slot held and the drain never settling.
-            .catch((err: unknown) => `error(${err instanceof Error ? err.message : String(err)})`)
-            .then((outcome) => {
+            .catch(decodeChildRejection)
+            .then((verdict) => {
               running--;
               releaseSlot(host.configDir);
-              outcomes[next] = outcome;
+              outcomes[next] = verdictOutcome(verdict);
               // A member the agent could not make green (a non-zero, non-park exit) is a terminal
               // failure (design §2.1): record it so the reducer folds the wave to `failed` even
               // though the run itself logged no verdict.
-              if (outcomes[next].startsWith("error")) cfg.log.log("failed", { taskId: next, detail: outcomes[next] });
+              if (verdict.kind === "failed") cfg.log.log("failed", { taskId: next, detail: verdict.detail });
               // A park with a live record is re-admittable if that record is later answered.
               if (outcomes[next] === "parked" && hasParked(cfg, next)) parkedWithRecord.add(next);
               fill();
@@ -1619,7 +1630,7 @@ async function resolveCampaignWave(
   // branch/worktree are kept for a fix-forward or prune. The wave holds — no `wave-done`, no
   // succeeding wave. The per-task `failed` events were logged in `queue`; here the campaign
   // records the `campaign-failed` stop marker (which `reduceCampaign` reads to hold the wave).
-  const failed = tasks.filter((t) => s.outcomes[t]?.startsWith("error"));
+  const failed = tasks.filter((t) => isFailedOutcome(s.outcomes[t]));
   if (failed.length) {
     cfg.log.log("campaign-failed", { index, detail: `${failed.join(", ")} failed` });
     enqueueOutbound(cfg, campaignFailedNotice(cfg.project, index + 1, merged, failed, cfg.baseBranch));

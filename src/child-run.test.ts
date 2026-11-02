@@ -1,13 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  decodeChildExit,
+  decodeChildRejection,
   decodeChildStart,
   enableJsonOutput,
   encodeChildStart,
   isCampaignChildRun,
+  isFailedOutcome,
   isJsonOutput,
   readAgentOverride,
   stampAgentOverride,
+  verdictOutcome,
   type ChildStart,
 } from "./child-run.ts";
 
@@ -59,4 +63,34 @@ test("a stamped agent override is the literal VETINARI_AGENT a child inherits an
   stampAgentOverride({ provider: "pi", effort: "xhigh" }, env);
   assert.deepEqual(env, { VETINARI_AGENT: '{"provider":"pi","effort":"xhigh"}' });
   assert.deepEqual(readAgentOverride(env), { provider: "pi", effort: "xhigh" });
+});
+
+test("a child's exit decodes to its verdict: 0 green, 2 parked, any other code failed with error(n)", () => {
+  assert.deepEqual(decodeChildExit(0, false), { kind: "green" });
+  assert.deepEqual(decodeChildExit(2, false), { kind: "parked" });
+  assert.deepEqual(decodeChildExit(1, false), { kind: "failed", detail: "error(1)" });
+  assert.deepEqual(
+    decodeChildExit(137, true),
+    { kind: "failed", detail: "error(137)" },
+    "an exit code is decoded as such even under a stop",
+  );
+});
+
+test("a child killed by a signal is stopped while the campaign is halted, else failed naming the signal", () => {
+  assert.deepEqual(decodeChildExit("SIGTERM", true), { kind: "stopped", signal: "SIGTERM" });
+  assert.deepEqual(decodeChildExit("SIGTERM", false), { kind: "failed", detail: "error(SIGTERM)" });
+});
+
+test("a spawn or stop-handling rejection decodes to a failure carrying its message", () => {
+  assert.deepEqual(decodeChildRejection(new Error("spawn ENOENT")), { kind: "failed", detail: "error(spawn ENOENT)" });
+  assert.deepEqual(decodeChildRejection("boom"), { kind: "failed", detail: "error(boom)" });
+});
+
+test("a verdict's outcome is the campaign's outcome string, and only a failure's reads as a failure", () => {
+  assert.equal(verdictOutcome({ kind: "green" }), "green");
+  assert.equal(verdictOutcome({ kind: "parked" }), "parked");
+  assert.equal(verdictOutcome({ kind: "failed", detail: "error(1)" }), "error(1)");
+  assert.equal(isFailedOutcome("error(1)"), true);
+  assert.equal(isFailedOutcome("error(merge failed)"), true);
+  for (const o of ["green", "parked", undefined]) assert.equal(isFailedOutcome(o), false, String(o));
 });

@@ -27,6 +27,8 @@ Within a milestone each bold section label appears at most once.
 
 **Improvements:**
 - [ops] After a project's question chat is re-pointed or its bot token rotated, the running gateway routes replies the way a restart would, without needing one (#693).
+- [user] `vetinari answer` on a park that can't be answered (`stopped`, `outdated-agent`, `conflict`) now gives one consistent refusal that names the reason and the move to make, e.g. "`42` is parked (`stopped`) and can't be answered. `vetinari redrive` to resume the campaign, or `vetinari run 42` for a standalone run." (#685).
+- [user] `vetinari parked` and Telegram's `/status` now always name the same hold for a parked campaign with no parked record — a red-base or crash hold beside an out-of-plan parked record is no longer hidden from `vetinari parked` (#685).
 
 **Bug fixes:**
 - [ops] The changelog fold (`vetinari changelog collect`, and a campaign's per-wave fold) no longer adds entries to a release milestone dated the same day, or deletes a milestone's intro text: it adds only to a milestone of its own title dated today, and otherwise starts a new "Collected changes" milestone above it (#697).

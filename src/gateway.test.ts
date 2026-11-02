@@ -546,6 +546,73 @@ test("announceTick sends a question once across ticks when persisting its messag
   assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 201)?.task, "A1", "a reply to that message routes to its question");
 });
 
+test("announceTick still sends the next pending question in the tick when an earlier one's persist fails", async (t) => {
+  const sent = countingTgSend(t);
+  const projects = [
+    alpha({ baseLocation: unwritableParkedBase(t, "first"), parked: [parked({ taskId: "A1", parkedAt: "t1" })] }),
+    project({
+      project: "beta",
+      conn: { token: "botB", chat: "-2" },
+      baseLocation: join(tmpdir(), `vetinari-announce-persist-${process.pid}-missing`),
+      parked: [parked({ taskId: "B1", parkedAt: "t1" })],
+    }),
+  ];
+  const index = newReplyIndex();
+
+  await announceTick(projects, index, memoryLogger());
+
+  assert.equal(sent.length, 2, "both questions are sent in the one tick");
+  assert.equal(resolveReply(index, { token: "botB", chat: "-2" }, 202)?.project, "beta", "the second question routes");
+});
+
+test("a failed persist logs gateway-announce-persist-failed with the project, task and message id", async (t) => {
+  countingTgSend(t);
+  const projects = [alpha({ baseLocation: unwritableParkedBase(t, "log"), parked: [parked({ taskId: "A1", parkedAt: "t1" })] })];
+  const logger = memoryLogger();
+
+  await announceTick(projects, newReplyIndex(), logger);
+
+  const rows = logger.events as unknown as Record<string, unknown>[];
+  const failed = rows.filter((e) => e.event === "gateway-announce-persist-failed");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].project, "alpha");
+  assert.equal(failed[0].task, "A1");
+  assert.equal(failed[0].messageId, 201);
+  assert.match(String(failed[0].error), /EACCES/);
+  assert.equal(rows.filter((e) => e.event === "gateway-announced").length, 1, "the landed send is still logged as announced");
+});
+
+test("a failed send logs gateway-announce-failed, records no route, and is retried next tick", async (t) => {
+  const saved = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return { json: async () => (calls === 1 ? { ok: false, error_code: 500 } : { ok: true, result: { message_id: 300 } }) };
+  }) as unknown as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = saved;
+  });
+  const projects = [
+    alpha({
+      baseLocation: join(tmpdir(), `vetinari-announce-persist-${process.pid}-missing`),
+      parked: [parked({ taskId: "A1", parkedAt: "t1" })],
+    }),
+  ];
+  const index = newReplyIndex();
+  const logger = memoryLogger();
+
+  await announceTick(projects, index, logger);
+
+  const rows = logger.events as unknown as Record<string, unknown>[];
+  assert.equal(rows.filter((e) => e.event === "gateway-announce-failed").length, 1);
+  assert.equal(index.byMessage.size, 0, "no route is recorded for a send that didn't land");
+
+  await announceTick(projects, index, logger);
+
+  assert.equal(calls, 2, "the question is retried on the next tick");
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 300)?.task, "A1");
+});
+
 test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {
   const pend = pendingAnnouncements(
     [

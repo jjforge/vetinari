@@ -101,7 +101,7 @@ one message to verify them, and writes the two `VETINARI_TELEGRAM_*` keys into t
 `host.env` (creating it `0600`), leaving any other keys in place. `vetinari init`
 offers the same step after its scaffold. The optional `VETINARI_TELEGRAM_THREAD_ID`
 is a property of a destination, not the bot connection — it stays a hand-edit here.
-`run`/`campaign`/`redrive`/`baseline` and the gateway warn (once, at start) when
+`run`/`campaign`/`redrive`/`answer`/`baseline` and the gateway warn (once, at start) when
 `.env` or `host.env` is group- or world-readable; they never change its mode.
 
 The gateway reads these live from each registered project's base location (it

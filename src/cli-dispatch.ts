@@ -18,12 +18,12 @@ import { resolve } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
 import { ANSWER_SOURCE_ENV_VAR, parseAgentFlags, parseAnswerSource } from "./config.ts";
 import { renderUsage } from "./help.ts";
-import { LiveCampaignRefusal, type HostCeiling, type liveCampaignPid, type projectHasLiveCampaign } from "./lease.ts";
+import type { HostCeiling, liveCampaignPid, projectHasLiveCampaign } from "./lease.ts";
 import { DOCKERFILE, staleImageWarning } from "./modes.ts";
-import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
+import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
-import { childRunEntry, type runLoop, type Outcome } from "./loop.ts";
+import { childRunEntry, type runLoop } from "./loop.ts";
 import { enableJsonOutput, type ChildStart } from "./child-run.ts";
 import {
   isPathEscapingTaskId,
@@ -54,6 +54,7 @@ import { Refusal } from "./refusal.ts";
 import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
 import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 import type { credentialsExposureWarning } from "./registry.ts";
+import { launch, reactToLiveCampaign } from "./launch.ts";
 
 const USAGE = renderUsage();
 
@@ -80,15 +81,6 @@ const enableJson = (on: boolean): void => {
 
 /** A partial `--agent`/`--model`/`--effort` override, as `parseAgentFlags` yields it. */
 export type AgentOverride = { provider?: string; model?: string; effort?: string };
-
-/**
- * The verdict→exit-code map both the run loop and the campaign share (design §3, §5 step 6,
- * user-guide "Where you see things"): 0 green/done, 2 parked, 1 failed. The loop returns the
- * outcome; the exit-code decision lives HERE (never in modes.ts/loop.ts). `green` and `done`
- * are the same success code so `run` and `campaign` speak one exit vocabulary.
- */
-const exitCodeFor = (outcome: Outcome | CampaignOutcome): number =>
-  outcome === "green" || outcome === "done" ? 0 : outcome === "parked" ? 2 : 1;
 
 /**
  * The redrive-only reason a campaign is parked on when it has left no answerable per-issue record —
@@ -422,29 +414,24 @@ export interface DispatchDeps {
   /** One `sendMessage`, the collector's verification of a bot connection before it writes. */
   tgSend: typeof tgSend;
   /** The image's `Created` and the Dockerfile's mtime and last commit — what the stale-image
-   *  warning at `campaign`/`redrive`/`run`/`baseline` start compares (#444). */
+   *  warning at `campaign`/`redrive`/`run`/`answer`/`baseline` start compares (#444). */
   readImageFreshness: typeof readImageFreshness;
   /** Who owns each path inside the image, from one `stat` container — what the mount-parent
-   *  refusal at `campaign`/`redrive`/`run`/`baseline` start checks (#512). Undefined: no probe. */
+   *  refusal at `campaign`/`redrive`/`run`/`answer`/`baseline` start checks (#512). Undefined: no probe. */
   readMountParentOwners: typeof readMountParentOwners;
   /** The one-line warning naming a group/world-readable `.env` or `host.env` under the given base
-   *  locations — what `campaign`/`redrive`/`run`/`baseline` start prints (#563). */
+   *  locations — what `campaign`/`redrive`/`run`/`answer`/`baseline` start prints (#563). */
   credentialsExposureWarning: typeof credentialsExposureWarning;
 }
 
 /**
- * Start a resume campaign, or return `undefined` when it loses the lease race to a live campaign
- * (#527): the early `projectHasLiveCampaign` probe reads without the host lock, so a campaign that
- * started since makes `campaign()` refuse at registration. The caller then reports the same refusal
- * its early check gives and runs no further step — no `archiveIfIdle` of the live campaign's log.
+ * The pre-launch checks every command that starts agents runs before its start: the stale-image and
+ * exposed-credentials warnings, then the mount-parent refusal.
  */
-async function resumeUnlessLive(start: () => Promise<CampaignOutcome>): Promise<CampaignOutcome | undefined> {
-  try {
-    return await start();
-  } catch (e) {
-    if (e instanceof LiveCampaignRefusal) return undefined;
-    throw e;
-  }
+function checkBeforeLaunch(deps: DispatchDeps): void {
+  warnIfImageStale(deps);
+  warnIfCredentialsExposed(deps);
+  refuseIfMountParentsUnwritable(deps);
 }
 
 /**
@@ -507,9 +494,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       return;
     }
     case "baseline": {
-      warnIfImageStale(deps);
-      warnIfCredentialsExposed(deps);
-      refuseIfMountParentsUnwritable(deps);
+      checkBeforeLaunch(deps);
       deps.setExitCode((await deps.baseline(cfg)) ? 0 : 1);
       return;
     }
@@ -527,36 +512,18 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // A campaign's OWN child `run` (VETINARI_CHILD) is exempt: its parent holds the lease
       // FOR it, so it must run (the archive-leftover step already skips children too).
       if (!deps.isCampaignChild && deps.projectHasLiveCampaign(deps.host.configDir, cfg.project)) {
-        deps.error(`a campaign is already running for ${cfg.project} — it owns this issue; run refused.`);
-        deps.setExitCode(4);
+        reactToLiveCampaign({ command: "run" }, deps);
         return;
       }
       enableJson(cmd.json);
-      // A campaign child skips both: its campaign checked once at start, not once per member.
-      if (!deps.isCampaignChild) {
-        warnIfImageStale(deps);
-        warnIfCredentialsExposed(deps);
-        refuseIfMountParentsUnwritable(deps);
-      }
-      deps.archiveLeftoverRun();
+      // A campaign child skips the checks: its campaign checked once at start, not once per member.
+      if (!deps.isCampaignChild) checkBeforeLaunch(deps);
       // A crash redrive spawned this child to resume a crashed session on the existing branch
       // (design §7): re-enter the loop on that session with a continue-where-you-left-off prompt
       // rather than a fresh fetch. A merge-conflict retry (design §6) carries its own prompt in
       // place of that one, or re-enters fresh with it when there is no session. Else a fresh run.
-      const resumeEntry = childRunEntry(deps.childStart);
-      // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
-      // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
-      // budget; a campaign child skips the slot itself (its parent holds one for it).
-      const outcome = await deps.runLoop(cfg, cmd.args[0], deps.host, resumeEntry);
-      deps.setExitCode(exitCodeFor(outcome));
-      // A `stopped` park (a signalled run) force-exits 2 now rather than returning and waiting for
-      // the abandoned agent call to let go of its handles (this issue). Keyed on the issue's own
-      // record reason read back through `listParked`, so a question/stall park exits normally.
-      if (
-        outcome === "parked" &&
-        deps.listParked(cfg).some((r) => normalize(r.taskId) === normalize(cmd.args[0]) && r.reason === "stopped")
-      )
-        deps.exit(2);
+      // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed.
+      await launch({ path: "run", taskId: cmd.args[0], entry: childRunEntry(deps.childStart) }, deps);
       return;
     }
     case "campaign": {
@@ -567,7 +534,7 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // A redrive refuses while a campaign process for the project is live (design §7): that
       // process owns the re-admit, so a second one must not run over it. Report one line and stop.
       if (deps.projectHasLiveCampaign(deps.host.configDir, cfg.project)) {
-        deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
+        reactToLiveCampaign({ command: "redrive" }, deps);
         return;
       }
       // The umbrella verb (ADR 0020, design §7): reconstruct the plan from the log and
@@ -576,23 +543,9 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       // the leftover it would reconstruct from, only archive once idle.
       deps.selectAgent(cfg, cmd.agent);
       enableJson(cmd.json);
-      warnIfImageStale(deps);
-      warnIfCredentialsExposed(deps);
-      refuseIfMountParentsUnwritable(deps);
-      const outcome = await resumeUnlessLive(() =>
-        deps.campaign(cfg, [], deps.host, undefined, {
-          autoPrune: cmd.autoPrune,
-          resume: true,
-          override: cmd.override,
-        }),
-      );
-      if (outcome === undefined) {
-        deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
-        return;
-      }
-      deps.archiveIfIdle();
+      checkBeforeLaunch(deps);
       // Exit with the campaign's verdict (design §5 step 6): 0 done, 2 parked, 1 failed.
-      deps.setExitCode(exitCodeFor(outcome));
+      await launch({ path: "redrive", name: undefined, autoPrune: cmd.autoPrune, override: cmd.override }, deps);
       return;
     }
     case "prune": {
@@ -726,24 +679,16 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   // archive step, so no destructive step runs on a refusal. A `--dry-run` only prints a plan, so
   // it is never refused.
   if (!cmd.dryRun && deps.projectHasLiveCampaign(host.configDir, cfg.project)) {
-    if (cmd.resume) {
-      // `campaign --resume` is the retained alias for `redrive`, so it refuses the way `redrive`
-      // does: the live campaign owns the re-admit, so log its line and stop — no exit code.
-      deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
-      return;
-    }
-    throw new Refusal(`a campaign is already running for ${cfg.project} — campaign refused.`);
+    // `campaign --resume` is the retained alias for `redrive`, so it reacts the way `redrive` does.
+    reactToLiveCampaign({ command: cmd.resume ? "redrive" : "campaign" }, deps);
+    return;
   }
   // Lock in the agent selection first (ADR 0016): validates it and preflights its
   // credentials before any container, and stamps VETINARI_AGENT so every child wave
   // `run` drives the chosen provider, not a silent claude.
   deps.selectAgent(cfg, cmd.agent);
   // A dry run starts nothing, so it is not warned.
-  if (!cmd.dryRun) {
-    warnIfImageStale(deps);
-    warnIfCredentialsExposed(deps);
-    refuseIfMountParentsUnwritable(deps);
-  }
+  if (!cmd.dryRun) checkBeforeLaunch(deps);
 
   // `--json` streams raw events to stdout (below, via the run logger) and — through this
   // reporter — silences every human line, so tooling reads clean JSONL. Without it the
@@ -761,19 +706,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
     // Under --resume, --override re-runs a failed member instead of stopping as failed
     // again (design §7); the literal-waves meaning of --override below never applies here
     // (resume takes no wave args and returns before reaching it).
-    const outcome = await resumeUnlessLive(() =>
-      deps.campaign(cfg, [], host, cmd.name, {
-        autoPrune: cmd.autoPrune,
-        resume: true,
-        override: cmd.override,
-      }),
-    );
-    if (outcome === undefined) {
-      deps.log(`a campaign is already running for ${cfg.project} — it will pick up the work; redrive refused.`);
-      return;
-    }
-    deps.archiveIfIdle();
-    deps.setExitCode(exitCodeFor(outcome));
+    await launch({ path: "redrive", name: cmd.name, autoPrune: cmd.autoPrune, override: cmd.override }, deps);
     return;
   }
 
@@ -811,10 +744,7 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
       deps.log(waves.map((w) => `"${w.join(" ")}"`).join(" "));
       return;
     }
-    deps.archiveLeftoverRun();
-    const outcome = await deps.campaign(cfg, waves, host, cmd.name, { autoPrune: cmd.autoPrune });
-    deps.archiveIfIdle();
-    deps.setExitCode(exitCodeFor(outcome));
+    await launch({ path: "campaign", waves, name: cmd.name, options: { autoPrune: cmd.autoPrune } }, deps);
     return;
   }
 
@@ -874,20 +804,24 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   }
 
   // Show the plan provenance about to run (its titled plan follows from `campaign` itself),
-  // then run it. Archive any leftover run first, and archive on completion (a halt still
-  // enters the archived-runs list, #141).
+  // then run it.
   reporter.line(report.report);
   reporter.line("");
-  deps.archiveLeftoverRun();
   // The plan's waived files and resolved file keys ride to `campaign-start` (each absent
   // when the plan has none).
-  const outcome = await deps.campaign(cfg, report.waves, host, cmd.name, {
-    autoPrune: cmd.autoPrune,
-    ...(report.waived && { waived: report.waived }),
-    ...(report.fileKeys && { fileKeys: report.fileKeys }),
-  });
-  deps.archiveIfIdle();
-  deps.setExitCode(exitCodeFor(outcome));
+  await launch(
+    {
+      path: "campaign",
+      waves: report.waves,
+      name: cmd.name,
+      options: {
+        autoPrune: cmd.autoPrune,
+        ...(report.waived && { waived: report.waived }),
+        ...(report.fileKeys && { fileKeys: report.fileKeys }),
+      },
+    },
+    deps,
+  );
 }
 
 /**
@@ -1105,35 +1039,23 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
   // A live campaign owns the re-admit (design §5 step 3, §8): stop here so no second process
   // runs the member beside it — the campaign's drain/grace picks up the answered record next tick.
   if (live) {
-    deps.log(`${taskId} answered — the live campaign will re-admit it.`);
+    reactToLiveCampaign({ command: "answer", taskId }, deps);
     return;
   }
 
-  // No live campaign. A member of a paused campaign is re-admitted by the redrive (design §7):
-  // it reconciles the answered park into a re-run-with-answer and integrates it, then archives
-  // once idle. The redrive carries the campaign's own verdict out (0 done / 2 parked / 1 failed).
-  if (awaitsRedrive) {
-    // A member whose last outcome is `failed` is refused by a plain redrive, and `--override` is
-    // campaign-wide (it re-runs every failed member of the wave), so the answer only delivers and
-    // names the move — the override consumes it.
-    if (failedMember) {
-      deps.log(`${taskId} answered — it failed on a prior run, so re-run it with \`vetinari redrive --override\`.`);
-      return;
-    }
-    const outcome = await resumeUnlessLive(() => deps.campaign(cfg, [], host, undefined, { resume: true }));
-    if (outcome === undefined) {
-      deps.log(`${taskId} answered — the live campaign will re-admit it.`);
-      return;
-    }
-    deps.archiveIfIdle();
-    deps.setExitCode(exitCodeFor(outcome));
+  // A member whose last outcome is `failed` is refused by a plain redrive, and `--override` is
+  // campaign-wide (it re-runs every failed member of the wave), so the answer only delivers and
+  // names the move — the override consumes it.
+  if (failedMember) {
+    deps.log(`${taskId} answered — it failed on a prior run, so re-run it with \`vetinari redrive --override\`.`);
     return;
   }
 
-  // A standalone park (no campaign): run the loop directly — it consumes the answered record
-  // (resume the session with the answer, or post it and re-enter fresh) and exits on its own
-  // verdict: 0 green, 2 parked, 1 failed. Like any run it holds one host slot (design §8).
-  deps.setExitCode(exitCodeFor(await deps.runLoop(cfg, taskId, host)));
+  // No live campaign: this answer starts the re-admit itself, so it runs the checks `redrive` and
+  // `run` run before theirs (#690). A member of a paused campaign is re-admitted by the redrive
+  // (design §7); a standalone park (no campaign) runs the loop directly.
+  checkBeforeLaunch(deps);
+  await launch(awaitsRedrive ? { path: "answer-redrive", taskId } : { path: "answer-run", taskId }, deps);
 }
 
 /**

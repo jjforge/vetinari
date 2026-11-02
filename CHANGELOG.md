@@ -35,6 +35,7 @@ Within a milestone each bold section label appears at most once.
 - [user] The dashboard's activity feed and log view no longer say an issue merged when it only passed its gates: a green now reads "passed its gates — waiting to merge", "merged" appears once it's on the base, and a passing gate check shows the running colour (#695).
 - [ops] The gateway no longer re-sends a parked question every announce tick when it can't record the question's message id (for example while the parked directory's lock is held); it logs `gateway-announce-persist-failed` instead, the reply still routes, and one such failure no longer holds up the other projects' announcements and the outbox in that tick (#700).
 - [user] Closing the terminal of a running `vetinari run` now stops it like Ctrl-C: the issue parks `stopped` with its work kept, and its container is closed. It used to leave the container and its agent running with nothing parked (#701).
+- [user] `vetinari answer` now runs the same pre-launch checks as `vetinari redrive` and `vetinari run` before it resumes a campaign or starts a standalone run, so it refuses unwritable mount parents instead of starting (#690).
 
 ### Collected changes — November 1, 2026
 

@@ -4,8 +4,8 @@
  * verdict a child's exit decodes to, and the one writer of a `stopped` park. The env transport lives
  * here alone — no other source reads or writes these `VETINARI_*` names.
  */
-import { encodeAgentOverride, parseAgentOverride } from "./config.ts";
-import { crashResumePrompt, type ReentryEntry, type ResumeEntry } from "./loop.ts";
+import { encodeAgentOverride, parseAgentOverride, type ResolvedConfig } from "./config.ts";
+import { park } from "./state.ts";
 
 /**
  * How a campaign starts a member's child `run` (design §6, §7): `fresh`; `resume` a crashed session
@@ -34,21 +34,6 @@ export function encodeChildStart(start: ChildStart): NodeJS.ProcessEnv {
 /** Read the start a campaign spawned this process with back out of `env`; an empty value is unset. */
 export function decodeChildStart(env: NodeJS.ProcessEnv): ChildStart {
   return childStart(env.VETINARI_RESUME_SESSION, env.VETINARI_RESUME_PROMPT);
-}
-
-/**
- * How a child `run` enters the loop from its start (design §6, §7): a session to resume, with the
- * conflict prompt when it re-enters or the crash prompt otherwise (a crash redrive); a prompt with no
- * session (a non-resumable provider) is a fresh run on the kept branch with the prompt added to the
- * issue text, as `freshRedReentry` does; a fresh start is a fresh run.
- */
-export function childRunEntry(start: ChildStart): ResumeEntry | ReentryEntry | undefined {
-  if (start.kind === "resume") return { resumeSessionId: start.session, answerPrompt: crashResumePrompt() };
-  if (start.kind === "fresh") return undefined;
-  if (start.session) return { resumeSessionId: start.session, answerPrompt: start.prompt };
-  return {
-    reentry: `---\n\n(Continuing earlier work on this task — a fresh run. Your prior commits are already on this branch.)\n\n${start.prompt}`,
-  };
 }
 
 /** Was this process spawned as a campaign/queue child `run`? Every encoded start carries the marker. */
@@ -118,4 +103,27 @@ export function verdictOutcome(verdict: ChildVerdict): string {
 /** Is this campaign outcome a failure — a member the agent could not make green, or whose merge failed? */
 export function isFailedOutcome(outcome: string | undefined): boolean {
   return !!outcome?.startsWith("error");
+}
+
+/** The question a `stopped` park carries: redrive-only, there is nothing to answer. */
+export const STOPPED_RUN_QUESTION = "The run was stopped before it reached a verdict.";
+
+/**
+ * Park a run that a stop signal ended before it reached a verdict: reason `stopped`, the signal as
+ * its `detail`, and the branch and session a later `run <id>` resumes. The one writer of this record —
+ * the run parking itself (`runLoop`'s `parkStopped`) and the campaign parking a child killed before it
+ * could (`stoppedRunOutcome`, #464) both call it. `park()` logs the `parked{stopped}` event.
+ */
+export async function parkStoppedRun(
+  cfg: ResolvedConfig,
+  run: { taskId: string; branch: string; sessionId?: string; signal?: NodeJS.Signals; question: string },
+): Promise<void> {
+  await park(cfg, {
+    taskId: run.taskId,
+    reason: "stopped",
+    detail: run.signal,
+    sessionId: run.sessionId,
+    branch: run.branch,
+    question: run.question,
+  });
 }

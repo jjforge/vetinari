@@ -23,8 +23,8 @@ import { DOCKERFILE, staleImageWarning } from "./modes.ts";
 import type { build, baseline, campaign, tgTest, requireTelegram, readImageFreshness, CampaignOutcome } from "./modes.ts";
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
-import type { runLoop, Outcome } from "./loop.ts";
-import { childRunEntry, enableJsonOutput, type ChildStart } from "./child-run.ts";
+import { childRunEntry, type runLoop, type Outcome } from "./loop.ts";
+import { enableJsonOutput, type ChildStart } from "./child-run.ts";
 import {
   isPathEscapingTaskId,
   type answerParked,

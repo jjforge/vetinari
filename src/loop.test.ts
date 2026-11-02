@@ -10,10 +10,10 @@ import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { answerParked, hasParked, listOutbox, listParked, park } from "./state.ts";
 import { projectHasLiveCampaign, readLeases, type HostCeiling } from "./lease.ts";
-import { childRunEntry } from "./child-run.ts";
 import {
   BLOCKED,
   DONE,
+  childRunEntry,
   crashResumePrompt,
   defaultLoopDeps,
   extractTurnSummary,

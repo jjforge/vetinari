@@ -20,7 +20,7 @@ import { hostSecretsPath, parseEnvFile } from "./registry.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event, readEventLog } from "./event-log.ts";
 import { withHostSlot, type HostCeiling } from "./lease.ts";
-import { isCampaignChildRun, isJsonOutput } from "./child-run.ts";
+import { STOPPED_RUN_QUESTION, isCampaignChildRun, isJsonOutput, parkStoppedRun, type ChildStart } from "./child-run.ts";
 
 /**
  * The files a single commit touched, from the host repo (the agent branch's objects share the host
@@ -230,6 +230,21 @@ export const perMergeCheckPrompt = (gate: string, detail: string, base: string, 
       `Merge ${base} into your branch and fix it, keeping the issue's acceptance criteria satisfied — its tests must still pass. ` +
       `Commit the merge. The signal contract is unchanged: ${DONE} when done, ${BLOCKED} if blocked — and end this turn with a <turn-summary> line as before.\n\n` +
       `The tail of ${gate}'s output on the merged tree:\n${detail}`;
+
+/**
+ * How a child `run` enters the loop from its start (design §6, §7): a session to resume, with the
+ * conflict prompt when it re-enters or the crash prompt otherwise (a crash redrive); a prompt with no
+ * session (a non-resumable provider) is a fresh run on the kept branch with the prompt added to the
+ * issue text, as `freshRedReentry` does; a fresh start is a fresh run.
+ */
+export function childRunEntry(start: ChildStart): ResumeEntry | ReentryEntry | undefined {
+  if (start.kind === "resume") return { resumeSessionId: start.session, answerPrompt: crashResumePrompt() };
+  if (start.kind === "fresh") return undefined;
+  if (start.session) return { resumeSessionId: start.session, answerPrompt: start.prompt };
+  return {
+    reentry: `---\n\n(Continuing earlier work on this task — a fresh run. Your prior commits are already on this branch.)\n\n${start.prompt}`,
+  };
+}
 
 /**
  * The `stalled/no-commit` park's question. No commit ahead of the base is not "no change": the
@@ -517,19 +532,18 @@ async function closeSandbox(s: RunState) {
   }
 }
 
-// Park the stopped run (reason `stopped`, `detail` the signal name, the sandbox branch — or the
-// conventional `<branchPrefix><id>` when no container was ever created, the recorded session so
-// a later `run <id>` can resume it, and a one-line question). The sandbox was already closed by
-// the container's `finally` on the way here. `park()` logs the `parked{stopped}` event.
+// Park the stopped run through the shared writer (`parkStoppedRun`): the signal, the sandbox branch —
+// or the conventional `<branchPrefix><id>` when no container was ever created — and the recorded
+// session so a later `run <id>` can resume it. The sandbox was already closed by the container's
+// `finally` on the way here.
 async function parkStopped(s: RunState): Promise<Outcome> {
   const { cfg, taskId } = s;
-  const question = "The run was stopped before it reached a verdict.";
-  await park(cfg, {
+  const question = STOPPED_RUN_QUESTION;
+  await parkStoppedRun(cfg, {
     taskId,
-    reason: "stopped",
-    detail: s.stopSignal,
-    sessionId: s.lastSessionId,
     branch: s.sbx?.branch ?? `${cfg.branchPrefix}${taskId}`,
+    sessionId: s.lastSessionId,
+    signal: s.stopSignal,
     question,
   });
   printParked(taskId, "stopped", question);

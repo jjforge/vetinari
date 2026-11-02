@@ -1,5 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ResolvedConfig } from "./config.ts";
+import { memoryLogger } from "./log.ts";
+import { listParked } from "./state.ts";
 import {
   decodeChildExit,
   decodeChildRejection,
@@ -9,6 +15,7 @@ import {
   isCampaignChildRun,
   isFailedOutcome,
   isJsonOutput,
+  parkStoppedRun,
   readAgentOverride,
   stampAgentOverride,
   verdictOutcome,
@@ -93,4 +100,29 @@ test("a verdict's outcome is the campaign's outcome string, and only a failure's
   assert.equal(isFailedOutcome("error(1)"), true);
   assert.equal(isFailedOutcome("error(merge failed)"), true);
   for (const o of ["green", "parked", undefined]) assert.equal(isFailedOutcome(o), false, String(o));
+});
+
+test("the stopped-park writer records the run as parked `stopped` — its branch, session, signal and question — and logs the park", async () => {
+  const log = memoryLogger();
+  const cfg = { parkedDir: join(mkdtempSync(join(tmpdir(), "vetinari-child-run-park-")), "parked"), log } as unknown as ResolvedConfig;
+
+  await parkStoppedRun(cfg, { taskId: "101", branch: "agent/101", sessionId: "sess-1", signal: "SIGTERM", question: "Why stopped?" });
+
+  const [rec] = listParked(cfg);
+  assert.deepEqual(
+    { ...rec, parkedAt: typeof rec.parkedAt },
+    {
+      parkedAt: "string",
+      taskId: "101",
+      reason: "stopped",
+      detail: "SIGTERM",
+      sessionId: "sess-1",
+      branch: "agent/101",
+      question: "Why stopped?",
+    },
+  );
+  assert.deepEqual(
+    log.events.map((e) => ({ ...e, ts: undefined })),
+    [{ ts: undefined, event: "parked", taskId: "101", reason: "stopped", detail: "SIGTERM" }],
+  );
 });

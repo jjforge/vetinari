@@ -26,6 +26,8 @@ import {
   failedVerdict,
   isFailedOutcome,
   isJsonOutput,
+  parkStoppedRun,
+  STOPPED_RUN_QUESTION,
   verdictOutcome,
   type ChildStart,
   type ChildVerdict,
@@ -38,7 +40,6 @@ import {
   hasParked,
   isAnswered,
   listParked,
-  park,
   readParked,
   type ParkReason,
 } from "./state.ts";
@@ -429,9 +430,9 @@ export function warnIfTelegramUnconfigured(cfg: Pick<ResolvedConfig, "project" |
  * outranks the stop. With none, the run never parked itself `stopped`, so the campaign parks it
  * instead. A member still holding a parked record was killed before `runLoop` consumed it (an
  * answered re-admit, a redrive of a `stopped` member): that record is left exactly as it is and
- * only its `parked` event is logged. Otherwise the member is parked `stopped`, as `runLoop`'s
- * `parkStopped` would with no sandbox — the conventional branch, the session this spawn was
- * resuming, the signal as the `detail`.
+ * only its `parked` event is logged. Otherwise the member is parked `stopped` through the same
+ * writer `runLoop`'s `parkStopped` uses (`parkStoppedRun`), as it would with no sandbox — the
+ * conventional branch, the session this spawn was resuming, the signal.
  */
 async function stoppedRunOutcome(
   cfg: ResolvedConfig,
@@ -449,13 +450,12 @@ async function stoppedRunOutcome(
     cfg.log.log("parked", { taskId, reason, ...(detail ? { detail } : {}) });
     return { kind: "parked" };
   }
-  await park(cfg, {
+  await parkStoppedRun(cfg, {
     taskId,
-    reason: "stopped",
-    detail: signal,
-    sessionId: resumeSession,
     branch: `${cfg.branchPrefix}${taskId}`,
-    question: "The run was stopped before it reached a verdict.",
+    sessionId: resumeSession,
+    signal,
+    question: STOPPED_RUN_QUESTION,
   });
   return { kind: "parked" };
 }

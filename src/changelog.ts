@@ -91,13 +91,22 @@ function milestoneDate(headingLine: string): string {
   return at < 0 ? "" : headingLine.slice(at + " — ".length).trim();
 }
 
+/** The title part of a milestone heading `### <title> — <date>`, or "" if it has no date. */
+function milestoneTitle(headingLine: string): string {
+  const at = headingLine.lastIndexOf(" — ");
+  return at < 0 ? "" : headingLine.slice("### ".length, at).trim();
+}
+
 /**
- * Parse a milestone body (the lines under its `### ` heading) into its sections,
- * keyed by label and preserving first-seen order. Blank separators are dropped;
- * each label's bullet lines are kept verbatim (bullets and their wrapped
- * continuations), so a re-render reproduces them.
+ * Parse a milestone body (the lines under its `### ` heading) into its prose and
+ * its sections. The prose is every line before the first label (a note or intro
+ * paragraph), kept verbatim with leading and trailing blank lines trimmed, so a
+ * re-render never deletes it. Sections are keyed by label, preserving first-seen
+ * order; blank separators are dropped and each label's bullet lines are kept
+ * verbatim (bullets and their wrapped continuations), so a re-render reproduces them.
  */
-function parseMilestoneSections(body: string[]): Map<string, string[]> {
+function parseMilestoneSections(body: string[]): { prose: string[]; sections: Map<string, string[]> } {
+  const prose: string[] = [];
   const sections = new Map<string, string[]>();
   let current: string[] | undefined;
   for (const line of body) {
@@ -107,11 +116,16 @@ function parseMilestoneSections(body: string[]): Map<string, string[]> {
       sections.set(label[1], current);
       continue;
     }
-    if (!current) continue; // blank lines / stray preamble before the first label
+    if (!current) {
+      prose.push(line); // prose before the first label, kept for the re-render
+      continue;
+    }
     if (line.trim() === "") continue;
     current.push(line);
   }
-  return sections;
+  while (prose.length && prose[0].trim() === "") prose.shift();
+  while (prose.length && prose[prose.length - 1].trim() === "") prose.pop();
+  return { prose, sections };
 }
 
 /**
@@ -127,12 +141,13 @@ function mergeSections(into: Map<string, string[]>, additions: FragmentSection[]
   }
 }
 
-/** Render a milestone's sections in canonical order under its heading line. */
-function renderMilestone(headingLine: string, sections: Map<string, string[]>): string {
+/** Render a milestone under its heading line: its prose (if any), then its sections in canonical order. */
+function renderMilestone(headingLine: string, sections: Map<string, string[]>, prose: string[] = []): string {
   const known = SECTION_ORDER.filter((l) => sections.has(l));
   const extra = [...sections.keys()].filter((l) => !SECTION_ORDER.includes(l));
   const blocks = [...known, ...extra].map((label) => [`**${label}:**`, ...sections.get(label)!].join("\n"));
-  return [headingLine, "", blocks.join("\n\n")].join("\n");
+  const intro = prose.length ? [...prose, ""] : [];
+  return [headingLine, "", ...intro, blocks.join("\n\n")].join("\n");
 }
 
 /** Split a changelog into its header (before the first milestone) and its milestone blocks. */
@@ -151,10 +166,13 @@ function splitMilestones(text: string): { header: string; milestones: { heading:
 
 /**
  * Fold fragment sections into `changelogText` under the current dated milestone
- * (issue #123). If the top milestone is already dated `today`, the fragments merge
- * into it — one block per label, sections in canonical order — so per-wave
- * collection accumulates into a single milestone for the day. Otherwise a new
- * milestone titled `title` and dated `today` is inserted at the top. Existing
+ * (issue #123). If the top milestone is one the fold would have created itself —
+ * dated `today` and titled `title` — the fragments merge into it, one block per
+ * label, sections in canonical order, its prose before the first label kept
+ * verbatim; so per-wave collection accumulates into a single milestone for the day.
+ * Otherwise a new milestone titled `title` and dated `today` is inserted at the top,
+ * even when the top one is also dated today: a release milestone, or any milestone
+ * a person titled, is never added to (issue #697). Existing
  * milestones below the target are preserved verbatim, and each label renders as a
  * single block per milestone (never two blocks of one label).
  */
@@ -163,10 +181,11 @@ export function collectFragments(changelogText: string, sections: FragmentSectio
   const { header, milestones } = splitMilestones(changelogText);
 
   let rendered: string[];
-  if (milestones.length && milestoneDate(milestones[0].heading) === today) {
-    const merged = parseMilestoneSections(milestones[0].body);
+  const top = milestones[0];
+  if (top && milestoneDate(top.heading) === today && milestoneTitle(top.heading) === title) {
+    const { prose, sections: merged } = parseMilestoneSections(top.body);
     mergeSections(merged, sections);
-    rendered = [renderMilestone(milestones[0].heading, merged), ...milestones.slice(1).map(rawMilestone)];
+    rendered = [renderMilestone(top.heading, merged, prose), ...milestones.slice(1).map(rawMilestone)];
   } else {
     const fresh = new Map<string, string[]>();
     mergeSections(fresh, sections);
@@ -260,7 +279,10 @@ export interface CollectOptions {
   changelogPath: string;
   /** Today's milestone date, from `formatMilestoneDate`. */
   today: string;
-  /** The title for a new milestone (used only when the top one is not dated today). */
+  /**
+   * The fold's milestone title: it merges into the top milestone only when that is
+   * dated today with this title, and otherwise starts a new milestone with it.
+   */
   title: string;
 }
 

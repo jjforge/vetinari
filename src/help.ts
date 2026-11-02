@@ -82,7 +82,7 @@ export const MODES: Mode[] = [
   {
     signature: 'changelog collect [--title "…"]',
     blurb:
-      "fold this repo's changelog.d/*.md fragments into CHANGELOG.md under today's milestone (append to the top milestone if it is dated today, else start one), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. --title sets a fresh milestone's title (default: \"Collected changes\")",
+      "fold this repo's changelog.d/*.md fragments into CHANGELOG.md under today's milestone (append to the top milestone only if it is a milestone of the same title dated today, otherwise start a new one above it, so a release milestone is never added to; a milestone's intro text is kept), then delete the consumed fragments. What the orchestrator runs per wave at merge; a human may run it directly. --title names the milestone to fold into, or to start (default: \"Collected changes\")",
   },
   {
     signature: "tidy [--apply] [--all]",

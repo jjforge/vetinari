@@ -20,7 +20,6 @@ import {
   outboxDirOf,
   parkedDirOf,
   setParkedMessageId,
-  UNASKED_PARK_REASONS,
   type OutboundRecord,
   type ParkedRecord,
   type ParkReason,
@@ -28,7 +27,7 @@ import {
 import { credentialsExposureWarning, gatewayConfigDir, readProjects } from "./registry.ts";
 import { notice } from "./notice.ts";
 import { Refusal } from "./refusal.ts";
-import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
+import { PARK_REASON_FACTS, campaignParkHold, recoverySentence } from "./park-reasons.ts";
 import {
   buildAllStatus,
   campaignRunning,
@@ -303,7 +302,7 @@ export function reconcileReplyIndex(index: ReplyIndex, projects: GatewayProject[
     const live =
       p.conn?.token === token &&
       record != null &&
-      !UNASKED_PARK_REASONS.has(record.reason) &&
+      !PARK_REASON_FACTS[record.reason]?.asksNothing &&
       (record.tgMessageId == null || record.tgMessageId === messageId);
     if (!live) index.byMessage.delete(key);
   }
@@ -422,7 +421,7 @@ export function pendingAnnouncements(projects: GatewayProject[], index: ReplyInd
     for (const record of p.parked) {
       // A `stopped` or `outdated-agent` record is never announced (and cannot be answered) — only
       // the campaign-level park notice goes out; its resume move is a redrive or `vetinari run <id>` (#403, #444).
-      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
+      if (PARK_REASON_FACTS[record.reason]?.asksNothing) continue;
       if (record.tgMessageId != null) continue;
       if (isAnnounced(index, p.project, record.taskId, record.parkedAt)) continue;
       out.push({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, conn, record });
@@ -661,35 +660,24 @@ export async function handlePruneCommand(
 }
 
 /**
- * The exact recovery move a park reason asks of the human (design §10, §13.1). A
- * `question`/`stalled` hold is answerable — replying to the announcement resumes the task
- * (a `stalled` one may instead be pruned), so those two keep their Telegram reply framing —
- * while every other reason is not answerable and reads the shared `PARK_RECOVERY` move as
- * a sentence. One line, ending in the exact command where the move names one; the enum is
- * the single `ParkReason`.
+ * The exact recovery move a park reason asks of the human (design §10, §13.1). An answerable
+ * park (`question`/`stalled`) resumes when the human replies to the announcement (a `stalled`
+ * one may instead be pruned), so it keeps its Telegram reply framing; every redrive-only park
+ * reads its shared per-issue move as a sentence. One line, ending in the exact command where the
+ * move names one.
  */
 export function parkRecoveryMove(reason: ParkReason, issue: string): string {
-  switch (reason) {
-    case "question":
-      return "Reply to this message to answer.";
-    case "stalled":
-      return `Reply to this message with guidance, or \`prune #${issue}\`.`;
-    case "conflict":
-    case "red-base":
-    case "crash":
-    case "stopped":
-    case "outdated-agent":
-      return recoverySentence(PARK_RECOVERY[reason], issue);
-  }
+  if (!PARK_REASON_FACTS[reason].answerable) return recoverySentence(PARK_REASON_FACTS[reason].issueMove, issue);
+  return reason === "stalled" ? `Reply to this message with guidance, or \`prune #${issue}\`.` : "Reply to this message to answer.";
 }
 
 /**
- * The move a campaign-level park asks for, where no single issue is named (the `parked` listing, the
- * `/status` summary). An operator stop (`stopped` on the wave, #403) is resumed by a plain redrive —
- * never `parkRecoveryMove`'s per-issue `vetinari run <id>`, which would print with a blank id.
+ * The move a campaign-level park asks for, where no single issue is named (the `/status` summary):
+ * the reason's campaign-level move as a sentence — so an operator stop (#403) reads a plain
+ * redrive, never a per-issue `vetinari run <id>` with a blank id.
  */
 export function campaignParkMove(reason: ParkReason): string {
-  return reason === "stopped" ? "`vetinari redrive` to resume it." : parkRecoveryMove(reason, "");
+  return recoverySentence(PARK_REASON_FACTS[reason].campaignMove, "");
 }
 
 /**
@@ -718,40 +706,6 @@ export function formatParkAnnouncement(project: string, record: ParkedRecord): s
     recover: parkRecoveryMove(record.reason, record.taskId),
     category: "finding",
   }).text;
-}
-
-/**
- * The park reasons the user guide marks *not answerable* (design §10, §13.1): a redrive-only
- * hold recovered by a `redrive` after the human's fix, never by replying to a question.
- * `red-base`/`crash` write no per-issue parked record (`src/archive.ts`), so a records-only
- * reading of "what is parked?" misses them. `conflict`, `stopped` and `outdated-agent` DO write a
- * parked record (`conflict` from the integrate loop in `src/merge.ts`, with no session), but it
- * cannot be answered — a redrive (or `vetinari run <id>` for a standalone `stopped`/`outdated-agent`
- * run) resumes it, never a reply. `stopped` and `outdated-agent` records are also never announced.
- */
-export const REDRIVE_ONLY_REASONS: ReadonlySet<ParkReason> = new Set(["red-base", "conflict", "crash", "stopped", "outdated-agent"]);
-
-/**
- * The redrive-only reason a campaign is parked on when it has no per-issue parked record —
- * `red-base`/`crash`, which write no record (`src/archive.ts`), so a surface that lists only the
- * records reports "nothing parked" while the campaign sits parked; this reads the campaign's own
- * fold instead. Returns the reason only when the campaign folds to `parked` and no record is listed:
- * an answerable question/stalled hold carries a record the caller lists, and so does a `conflict`
- * park — unanswerable, resumed only by a redrive (see `REDRIVE_ONLY_REASONS`) — so for either this
- * returns nothing. The surface can then name the recovery that applies instead of the
- * answer-a-question dead end. The reason is the wave-level hold (`red-base`) or, failing that, a
- * parked member's own (`crash`).
- */
-export function redriveOnlyPark(status: CampaignStatus): ParkReason | undefined {
-  if (status.parked.length) return undefined;
-  // A pruned wave is out of the plan, so neither the fold nor the reason lookup reads it.
-  const waves = liveWaves(status);
-  if (campaignState(waves.map((w) => w.status)) !== "parked") return undefined;
-  const waveReason = waves.find((w) => w.reason && REDRIVE_ONLY_REASONS.has(w.reason))?.reason;
-  if (waveReason) return waveReason;
-  for (const w of waves)
-    for (const i of w.issues) if (i.status === "parked" && i.reason && REDRIVE_ONLY_REASONS.has(i.reason)) return i.reason;
-  return undefined;
 }
 
 /**
@@ -787,7 +741,7 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
       // the parked queue above), so "nothing parked" would misreport the parked campaign as idle
       // and point at a reply that cannot resolve it. Name the hold and the recovery it actually
       // needs; a truly idle project still reads "nothing parked".
-      const redrive = redriveOnlyPark(s);
+      const redrive = campaignParkHold(s);
       lines.push(redrive ? `  ⏸ ${redrive} — ${campaignParkMove(redrive)}` : "  nothing parked");
     }
   }
@@ -797,7 +751,7 @@ export function formatGatewayStatus(statuses: CampaignStatus[]): string {
   // nothing parked, with no question to reply to.
   if (statuses.some((s) => s.parked.length > 0)) {
     lines.push("", "Reply to a question message to answer and resume it.");
-  } else if (!statuses.some((s) => redriveOnlyPark(s))) {
+  } else if (!statuses.some((s) => campaignParkHold(s))) {
     lines.push("", "Nothing parked across these projects.");
   }
   return lines.join("\n");
@@ -964,7 +918,7 @@ export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
     for (const record of p.parked) {
       // A `stopped`/`outdated-agent` record was never announced, so there is no reply to route back
       // to it — skip it on rebuild too, mirroring `pendingAnnouncements`.
-      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
+      if (PARK_REASON_FACTS[record.reason]?.asksNothing) continue;
       if (record.tgMessageId == null) continue;
       recordSend(index, conn, record.tgMessageId, {
         project: p.project,

@@ -3,7 +3,7 @@
 // dashboard. It imports no `dashboard-*` module but the leaf `dashboard-event-text.ts`, so the
 // domain never reaches the dashboard through it (pinned by `import-cycles.test.ts`);
 // `dashboard-lifecycle.ts` and `dashboard-model.ts` re-export it.
-import { type ParkReason } from "./state.ts";
+import { PARK_REASON_FACTS, type ParkReason } from "./park-reasons.ts";
 import { applyPrune } from "./prune.ts";
 import { applyGraft, applyReplan } from "./plan.ts";
 import { type OrchestratorEvent } from "./event-log.ts";
@@ -60,8 +60,6 @@ export type WaveStatus = "completed" | "running" | "unstarted" | "parked" | "fai
  */
 export type CampaignState = "failed" | "parked" | "running" | "completed" | "unstarted";
 
-const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "conflict", "red-base", "crash", "stopped", "outdated-agent"]);
-
 /**
  * Coerce a `parked` event/record's `reason` to the one enum (design §2.3). Writers emit the
  * enum directly and archived logs are translated by the alias table before they reach the
@@ -69,7 +67,7 @@ const PARK_REASONS: ReadonlySet<string> = new Set(["question", "stalled", "confl
  * to `question` (an answerable hold rather than a silent drop).
  */
 export const parkReasonFromEvent = (reason: string | undefined): ParkReason =>
-  reason && PARK_REASONS.has(reason) ? (reason as ParkReason) : "question";
+  reason && Object.hasOwn(PARK_REASON_FACTS, reason) ? (reason as ParkReason) : "question";
 
 /**
  * The wave fold (ADR 0019): a wave's status is a pure fold of its issues' lifecycles,

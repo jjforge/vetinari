@@ -494,12 +494,29 @@ test("the issue sheet shows a delivered answer read-only — no reply box, no op
   assert.match(issueDetailSheetMarkup(false), /<p class="reply-answer" id="reply-answer" hidden><\/p>/);
 });
 
-test("the issue sheet's PARK_RECOVERY table carries a `stopped` entry — a signalled run is redriven, not answered", () => {
+test("the issue sheet's park-reason table carries a `stopped` entry — a signalled run is redriven, not answered", () => {
   // A stopped park is redrive-only (dashboard-visual-state issueMoves), so the sheet shows a
-  // recovery notice rather than a reply box. The notice text comes from PARK_RECOVERY[stopped].
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"stopped":"[^"]*vetinari redrive[^"]*vetinari run <id>[^"]*"/);
+  // recovery notice rather than a reply box. The notice text comes from the stopped record's issueMove.
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"stopped":\{[^}]*"issueMove":"[^"]*vetinari redrive[^"]*vetinari run <id>[^"]*"/);
 });
 
-test("the issue sheet's PARK_RECOVERY table carries an `outdated-agent` entry — update the agent CLI, then redrive (#444)", () => {
-  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent":"[^"]*vetinari build[^"]*redrive[^"]*"/);
+test("the issue sheet's park-reason table carries an `outdated-agent` entry — update the agent CLI, then redrive (#444)", () => {
+  assert.match(ISSUE_DETAIL_SHEET_SCRIPT, /"outdated-agent":\{[^}]*"issueMove":"[^"]*vetinari build[^"]*redrive[^"]*"/);
+});
+
+test("the issue sheet receives every park reason's answerable fact, and hand-types no redrive-only list (#685)", () => {
+  // ADR 0012: the sheet is handed the module's per-reason table, so it cannot keep its own copy.
+  const shipped = ISSUE_DETAIL_SHEET_SCRIPT.match(/const PARK_REASON_FACTS = (\{.*\});/);
+  assert.ok(shipped, "the sheet inlines the park-reason table");
+  const table = JSON.parse(shipped![1]) as Record<string, { answerable: boolean }>;
+  assert.deepEqual(Object.fromEntries(Object.entries(table).map(([reason, facts]) => [reason, facts.answerable])), {
+    question: true,
+    stalled: true,
+    conflict: false,
+    "red-base": false,
+    crash: false,
+    stopped: false,
+    "outdated-agent": false,
+  });
+  assert.doesNotMatch(ISSUE_DETAIL_SHEET_SCRIPT, /REDRIVE_ONLY/);
 });

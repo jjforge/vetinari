@@ -13,7 +13,8 @@ import {
 import type { Logger } from "./log.ts";
 import { runGates } from "./gate.ts";
 import { agentFor, agentSelectionFor, makeSandbox, type Sandbox } from "./sandbox.ts";
-import { UNASKED_PARK_REASONS, clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
+import { clearParked, enqueueOutbound, hasParked, park, readParked } from "./state.ts";
+import { PARK_REASON_FACTS } from "./park-reasons.ts";
 import { notice } from "./notice.ts";
 import { HARVEST_PROMPT, findingKey, parseFindings, scrubFinding, triageFindings } from "./findings.ts";
 import { hostSecretsPath, parseEnvFile } from "./registry.ts";
@@ -587,7 +588,7 @@ async function consumeParkedRecord(s: RunState, resumable: boolean, provider: Ag
       await cfg.postComment(taskId, parkedAnswerComment(rec.question, rec.answer));
     }
     clearParked(cfg, taskId);
-  } else if (UNASKED_PARK_REASONS.has(rec.reason)) {
+  } else if (PARK_REASON_FACTS[rec.reason]?.asksNothing) {
     // A `stopped` record continues a signalled run (this issue): `vetinari run <id>` resumes
     // the recorded session when the provider is resumable, the record kept a session id, and
     // the kept branch already carries work (commitsAhead > 0) — otherwise it runs fresh on the

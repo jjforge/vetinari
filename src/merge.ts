@@ -7,7 +7,7 @@ import { runGates } from "./gate.ts";
 import { makeSandbox, removeCopilotDir } from "./sandbox.ts";
 import { applyCollect, foldFragments, formatMilestoneDate, FRAGMENT_DIR, type FragmentNearMiss } from "./changelog.ts";
 import { clearParked, clearParkedIn, listParkedIn, writeParkedRecord } from "./state.ts";
-import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
+import { PARK_REASON_FACTS, recoverySentence } from "./park-reasons.ts";
 import { readEventLog } from "./event-log.ts";
 import { reduceCampaign } from "./campaign-fold.ts";
 import type { PointerDrop } from "./registry.ts";
@@ -169,7 +169,7 @@ export function parkMergeConflict(cfg: ResolvedConfig, conflict: MergeConflict):
         ? `Merge of ${branch} changes ${conflict.paths.join(", ")}, which #${conflict.taskId}'s brief doesn't declare — declare them on the issue's marker line and \`vetinari redrive\`, or merge it by hand.`
         : conflict.gate
           ? `Merge of ${branch} fails ${conflict.gate} — fix it on the base, then \`vetinari redrive\`.`
-          : `Merge conflict on ${branch}. ${recoverySentence(PARK_RECOVERY.conflict, conflict.taskId)}`,
+          : `Merge conflict on ${branch}. ${recoverySentence(PARK_REASON_FACTS.conflict.issueMove, conflict.taskId)}`,
   });
   cfg.log.log("parked", { taskId: conflict.taskId, reason: "conflict", detail: conflict.detail });
 }

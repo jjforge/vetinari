@@ -7,30 +7,10 @@ import type { MessageCategory, ResolvedConfig } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import { Refusal } from "./refusal.ts";
 
-/**
- * The one park-reason enum (design §2.3), the reason on the parked record, the
- * `parked` event, the reducer, the gateway and the dashboard. `detail` carries the
- * specifics — which `stalled` (budget / idle / no-commit), the conflict output, the
- * gate tail — so the reason itself stays a small closed set:
- * - `question` — the run loop hit `BLOCKED`; an answer resumes it.
- * - `stalled`  — turn budget, idle timeout, or an empty `COMPLETE`; an answer guides it.
- * - `conflict` — the integrator hit a merge conflict; a human resolves and redrives.
- * - `red-base` — the merged base gated red; fix-forward or prune, then redrive.
- * - `crash`    — reconciliation found a dead run with no stop marker since the latest `wave-start`; redrive.
- * - `stopped`  — a person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
- *   kept. It cannot be answered — `vetinari run <id>` continues a standalone run, a redrive a campaign.
- * - `outdated-agent` — the agent CLI is too old for the model; update the agent CLI (`vetinari
- *   build` for the default Docker image), then redrive. Like `stopped`, it cannot be answered.
- */
-export type ParkReason = "question" | "stalled" | "conflict" | "red-base" | "crash" | "stopped" | "outdated-agent";
-
-/**
- * The park reasons that ask nothing (#444): a record that is never announced per issue, cannot be
- * answered, holds no grace wait, and is consumed when the run next starts — a redrive (or
- * `vetinari run <id>`) re-runs it. `stopped` (a person stopped it) and `outdated-agent` (update
- * the agent CLI first).
- */
-export const UNASKED_PARK_REASONS: ReadonlySet<ParkReason> = new Set(["stopped", "outdated-agent"]);
+// The one park-reason enum and its per-reason facts live in park-reasons.ts; re-exported so this
+// module's importers keep reading it from here.
+import type { ParkReason } from "./park-reasons.ts";
+export type { ParkReason };
 
 export interface ParkedRecord {
   taskId: string;

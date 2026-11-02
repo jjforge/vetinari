@@ -77,7 +77,7 @@ export type ChildVerdict = { kind: "green" } | { kind: "parked" } | { kind: "fai
 /** How a child `run` ended: a verdict, or — killed by a signal under a stop — not yet one (#464). */
 export type ChildExit = ChildVerdict | { kind: "stopped"; signal: NodeJS.Signals };
 
-/** A failure's detail — `error(<cause>)`, the text a `failed` event carries. */
+/** A failure verdict, its detail `error(<cause>)` — the text a `failed` event carries. */
 export const failedVerdict = (cause: string | number): ChildVerdict => ({ kind: "failed", detail: `error(${cause})` });
 
 /**

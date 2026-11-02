@@ -186,11 +186,11 @@ None is project or host configuration; do not set the plumbing ones yourself.
 
 | Variable | Set by | Meaning |
 | --- | --- | --- |
-| `VETINARI_CHILD` | a queue/campaign, on every child `run` it spawns (`childSpawnEnv`) | marks the run as a campaign child: it does not archive the parent's in-flight log as a leftover, is exempt from `run`'s live-campaign refusal (its parent holds the lease), and leaves the resume hint to its parent |
-| `VETINARI_JSON` | `--json` on `campaign`/`run`/`redrive`, set to `1` on the CLI's own process; child `run`s inherit it | streams the raw event JSONL to stdout; unset, stdout carries the human lines only |
-| `VETINARI_RESUME_SESSION` | a campaign redrive of a crashed member (`selfSpawnRun`) | the crashed session id the child `run` resumes on the existing branch instead of starting fresh |
-| `VETINARI_RESUME_PROMPT` | a campaign's merge-conflict retry (`selfSpawnRun`) | the conflict prompt the child `run` resumes with — or, on a non-resumable provider, re-enters fresh on the kept branch with it added to the issue text |
-| `VETINARI_AGENT` | `run`/`campaign` with `--agent`/`--model`/`--effort` | the CLI agent override, re-stamped so every child `run` drives the same agent as its parent; layered over the config's `agent` |
+| `VETINARI_CHILD` | a queue/campaign, on every child `run` it spawns (`encodeChildStart`, `src/child-run.ts`) | marks the run as a campaign child: it does not archive the parent's in-flight log as a leftover, is exempt from `run`'s live-campaign refusal (its parent holds the lease), and leaves the resume hint to its parent |
+| `VETINARI_JSON` | `--json` on `campaign`/`run`/`redrive`, set to `1` on the CLI's own process (`enableJsonOutput`, `src/child-run.ts`); child `run`s inherit it | streams the raw event JSONL to stdout; unset, stdout carries the human lines only |
+| `VETINARI_RESUME_SESSION` | a campaign redrive of a crashed member (`encodeChildStart`, `src/child-run.ts`) | the crashed session id the child `run` resumes on the existing branch instead of starting fresh |
+| `VETINARI_RESUME_PROMPT` | a campaign's merge-conflict retry (`encodeChildStart`, `src/child-run.ts`) | the conflict prompt the child `run` resumes with — or, on a non-resumable provider, re-enters fresh on the kept branch with it added to the issue text |
+| `VETINARI_AGENT` | `run`/`campaign` with `--agent`/`--model`/`--effort` (`stampAgentOverride`, `src/child-run.ts`) | the CLI agent override, re-stamped so every child `run` drives the same agent as its parent; layered over the config's `agent` |
 | `VETINARI_ANSWER_SOURCE` | the dashboard (`ui`) and the gateway (`telegram`) on the `vetinari answer` they spawn | the `source` the `answered` event records; unset or unrecognised reads as `cli` |
 | `VETINARI_DEMO_DIR` | nothing in vetinari — whoever runs the `make demo-create` / `make demo-remove` dev tool and wants the fixture elsewhere | the root the demo dashboard fixture's projects seed under, and the only root `demo-remove` deletes; default `~/.cache/vetinari-demo` |
 

@@ -613,7 +613,7 @@ test("serveAllStatus GET /api/feed serves the cross-project event feed as JSON",
     // The feed merges both projects newest-first, each row repo-prefixed.
     assert.deepEqual(
       feed.map((f: { text: string }) => f.text),
-      ["alpha — #101 merged", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
+      ["alpha — #101 passed its gates — waiting to merge", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
     );
     assert.equal(feed[0].kind, "green");
   } finally {

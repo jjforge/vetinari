@@ -982,7 +982,7 @@ test("buildFeed merges every project's narratable events into one newest-first, 
   // Newest-first across projects; the stale registration and the machine-noise event are both absent.
   assert.deepEqual(
     feed.map((f) => f.text),
-    ["alpha — #101 merged", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
+    ["alpha — #101 passed its gates — waiting to merge", "beta — #201 parked: question", "alpha — Campaign “alpha work” started"],
   );
   // Each row carries the time and the event kind alongside the sentence.
   assert.equal(feed[0].ts, "2025-03-01T08:02:00.000Z");
@@ -1003,16 +1003,17 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
 
     // The row's `raw` is the underlying event serialized — the bytes the Raw toggle highlights and
     // Download JSON emits (#203), distinct from the repo-prefixed humanized `text`.
-    assert.equal(feed[0].text, "acme — #101 merged");
+    assert.equal(feed[0].text, "acme — #101 passed its gates — waiting to merge");
     assert.deepEqual(JSON.parse(feed[0].raw), green);
     // …and each row carries the shared log-view parts (#216): the repo leads the message as the
-    // actor, the narration is one plain span, and the dot reads the event's state (a merge → green).
+    // actor, the narration is one plain span, and the dot reads the event's state (a green is still
+    // running, waiting to merge — #695).
     assert.deepEqual(feed[0].humanized, {
       time: "00:02:00",
       actor: "acme",
       verb: "",
-      spans: [{ text: "#101 merged", kind: "plain" }],
-      dot: "merged",
+      spans: [{ text: "#101 passed its gates — waiting to merge", kind: "plain" }],
+      dot: "running",
     });
   });
 });
@@ -1020,8 +1021,8 @@ test("buildFeed carries each row's underlying event as raw NDJSON, alongside the
 test("a merged event that names its issue only through its branch still renders the number, never #undefined", () => {
   // The campaign wave-merge / per-issue green path can carry the issue number in
   // its `branch` (agent/<id>) rather than a `taskId`. The feed formatter must
-  // recover it there so the row reads "#<issue> merged", not "#undefined merged".
-  assert.equal(describeEvent(event("green", { taskId: "", branch: "agent/639", commits: [] })), "#639 merged");
+  // recover it there so the row reads "#<issue> …", not "#undefined …".
+  assert.equal(describeEvent(event("green", { taskId: "", branch: "agent/639", commits: [] })), "#639 passed its gates — waiting to merge");
 
   const base = join(tmpdir(), `vetinari-feed-branch-${Date.now()}`);
   const dir = join(base, "acme");
@@ -1029,7 +1030,7 @@ test("a merged event that names its issue only through its branch still renders 
 
   const feed = buildFeed([pointerFor("acme", dir)], new Date("2025-03-01T09:00:00.000Z"));
 
-  assert.equal(feed[0].text, "acme — #639 merged");
+  assert.equal(feed[0].text, "acme — #639 passed its gates — waiting to merge");
   assert.ok(!feed.some((f) => f.text.includes("#undefined")));
 });
 
@@ -1053,7 +1054,7 @@ test("buildFeed surfaces an idle project's recently-archived run, and drops one 
   const feed = buildFeed([pointerFor("acme", dir)], new Date("2026-08-24T12:00:00.000Z"));
 
   const texts = feed.map((f) => f.text);
-  assert.ok(texts.includes("acme — #101 merged"), "the recently-archived merge feeds");
+  assert.ok(texts.includes("acme — #101 passed its gates — waiting to merge"), "the recently-archived green feeds");
   assert.ok(!texts.some((t) => t.includes("#999")), "the >48h-old run does not feed");
 });
 
@@ -1074,7 +1075,7 @@ test("buildFeed cuts individual events by ts even inside an in-window archive (#
 
   const texts = feed.map((f) => f.text);
   // The 47h-old merge is in-window; the 49h-old campaign-start is cut by its ts.
-  assert.ok(texts.includes("acme — #777 merged"), "the in-window merge feeds");
+  assert.ok(texts.includes("acme — #777 passed its gates — waiting to merge"), "the in-window green feeds");
   assert.ok(!texts.some((t) => t.includes("edge")), "the pre-window start is cut by ts");
 });
 

@@ -62,13 +62,14 @@ test("a commit event reads `committed` + a code-styled short sha and file count,
   assert.deepEqual(many.spans, [code("abcdef1"), p(" · 2 files")]);
 });
 
-test("a gate-result event reads `gate passed` green and `gate failed` red, code-styled cmd", () => {
+test("a gate-result event reads `gate passed` running and `gate failed` red, code-styled cmd", () => {
   const pass = humanizeLogLine(
     raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 0, seconds: 12, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })),
   );
   assert.equal(pass.verb, "gate passed");
   assert.deepEqual(pass.spans, [code("npm test"), p(" (12s)")]);
-  assert.equal(pass.dot, "merged");
+  // A passed gate check is not a merge — the issue is still running (#695).
+  assert.equal(pass.dot, "running");
   const fail = humanizeLogLine(
     raw(event("gate-result", { taskId: "204", cmd: "npm test", exitCode: 1, seconds: 3, outFile: "o", ts: "2026-08-28T00:00:00.000Z" })),
   );
@@ -113,8 +114,16 @@ test("a turn event reads `turn N` + the agent summary as the strong key term, ru
   assert.deepEqual(bare.spans, []);
 });
 
-test("a green event reads verb `merged` (green dot), #issue actor, no spans", () => {
+test("a green event reads verb `passed its gates` — waiting to merge (running dot), #issue actor (#695)", () => {
   const row = humanizeLogLine(raw(event("green", { taskId: "204", branch: "agent/204", commits: ["a"], ts: "2026-08-28T00:00:00.000Z" })));
+  assert.equal(row.actor, "#204");
+  assert.equal(row.verb, "passed its gates");
+  assert.deepEqual(row.spans, [p("— waiting to merge")]);
+  assert.equal(row.dot, "running");
+});
+
+test("a merged event reads verb `merged` (merged dot), #issue actor, no spans", () => {
+  const row = humanizeLogLine(raw(event("merged", { taskId: "204", branch: "agent/204", ts: "2026-08-28T00:00:00.000Z" })));
   assert.equal(row.actor, "#204");
   assert.equal(row.verb, "merged");
   assert.deepEqual(row.spans, []);

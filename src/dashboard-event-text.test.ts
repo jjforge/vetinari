@@ -132,7 +132,16 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
   assert.equal(describeEvent(event("wave-done", { index: 2, merged: [] })), "Wave 3 merged nothing");
   assert.equal(describeEvent(event("campaign-done", { waves: 3, name: "gateway work" })), "Campaign “gateway work” complete (3 waves)");
   assert.equal(describeEvent(event("campaign-done", { waves: 1 })), "Campaign complete (1 wave)");
-  assert.equal(describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })), "#101 merged");
+  // A green passed its gates but is not on the base yet — it waits to merge (#695).
+  assert.equal(
+    describeEvent(event("green", { taskId: "#101", branch: "agent/101", commits: [] })),
+    "#101 passed its gates — waiting to merge",
+  );
+  // Only a merge onto the base says "merged" — a redrive's already-merged re-log reads the same,
+  // and a merge that names its issue only through its branch finds it there (#695).
+  assert.equal(describeEvent(event("merged", { taskId: "101", branch: "agent/101" })), "#101 merged");
+  assert.equal(describeEvent(event("merged", { taskId: "101", branch: "agent/101", alreadyMerged: true })), "#101 merged");
+  assert.equal(describeEvent(event("merged", { taskId: "", branch: "agent/102" })), "#102 merged");
   // A parked event narrates its one-enum reason (design §2.3).
   assert.equal(describeEvent(event("parked", { taskId: "202", reason: "question" })), "#202 parked: question");
   assert.equal(describeEvent(event("prune", { target: "303", removed: ["303", "304"], dropped: ["303", "304"] })), "Pruned #303, #304");
@@ -164,7 +173,10 @@ test("describeEvent narrates the operator-facing events in plain words", () => {
 
 test("formatFeedEvent prefixes an event's plain-words sentence with its repo, and drops machine noise", () => {
   // A narratable event reads as one repo-prefixed sentence.
-  assert.equal(formatFeedEvent("alpha", event("green", { taskId: "101", branch: "agent/101", commits: [] })), "alpha — #101 merged");
+  assert.equal(
+    formatFeedEvent("alpha", event("green", { taskId: "101", branch: "agent/101", commits: [] })),
+    "alpha — #101 passed its gates — waiting to merge",
+  );
   assert.equal(
     formatFeedEvent("beta", event("turn", { taskId: "201", turn: 2, summary: "Wrote a failing test" })),
     "beta — Wrote a failing test",
@@ -190,7 +202,7 @@ test("lastEventText picks the most recent operator-facing event, ignoring machin
     }),
     noise({ ts: "2025-01-01T00:03:00.000Z", event: "gate", cmds: ["npm test"] }),
   ];
-  assert.equal(lastEventText(events), "#101 merged");
+  assert.equal(lastEventText(events), "#101 passed its gates — waiting to merge");
   assert.equal(lastEventText([]), "No activity yet");
 });
 

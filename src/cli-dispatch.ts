@@ -1042,27 +1042,16 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     return;
   }
 
-  // A `stopped` park cannot be answered (this issue): a person stopped the run before a verdict,
-  // so there is no question to resolve — only a resume move. Refuse before delivering anything,
-  // naming the moves (a redrive for a campaign, `vetinari run <id>` for a standalone run). Every
-  // gateway reply ends up here, so this also refuses a reply to an old question message for a task
-  // whose current record is `stopped`.
+  // A redrive-only park cannot be answered (#685): a `stopped` run reached no verdict, an
+  // `outdated-agent` one needs the agent CLI updated, and a `conflict` member is green with only its
+  // merge conflicted — an answer would re-run it fresh. Refuse before delivering anything, naming
+  // the reason and its move. Every gateway reply ends up here, so this also refuses a reply to an
+  // old question message for a task whose current record is redrive-only.
   const rec = deps.listParked(cfg).find((r) => normalize(r.taskId) === normalize(taskId));
   const reason = rec?.reason;
-  if (reason === "stopped")
+  if (reason && PARK_REASON_FACTS[reason]?.answerable === false)
     throw new Refusal(
-      `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
-    );
-  // An `outdated-agent` park (#444) asked nothing either: the agent CLI is too old for the model.
-  if (reason === "outdated-agent")
-    throw new Refusal(
-      `${taskId} parked because the agent CLI is too old for the model — it cannot be answered. Update the agent CLI in the project's sandbox (\`vetinari build\` for the default Docker image), then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
-    );
-  // A `conflict` park asked nothing either: the member is green and only its merge conflicted, so
-  // an answer would re-run it fresh instead of integrating it. Refused whether or not postComment is set.
-  if (reason === "conflict")
-    throw new Refusal(
-      `${taskId} parked on a merge conflict — it cannot be answered. ${recoverySentence(PARK_REASON_FACTS.conflict.issueMove, taskId)}`,
+      `\`${taskId}\` is parked (\`${reason}\`) and can't be answered. ${recoverySentence(PARK_REASON_FACTS[reason].issueMove, taskId)}`,
     );
 
   // A session-less park (an idle stall can save one) re-runs fresh with the answer relayed as a

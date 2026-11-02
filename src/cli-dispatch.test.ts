@@ -756,10 +756,33 @@ for (const postComment of [undefined, async () => {}]) {
       () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
       (err: Error) =>
         err instanceof Refusal &&
-        err.message ===
-          "436 parked on a merge conflict — it cannot be answered. Resolve the conflict on the base, then `vetinari redrive`.",
+        err.message === "`436` is parked (`conflict`) and can't be answered. Resolve the conflict on the base, then `vetinari redrive`.",
     );
     assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered to a conflict record");
+    assert.equal((deps.campaign as any).calls.length, 0);
+    assert.equal((deps.runLoop as any).calls.length, 0);
+  });
+}
+
+// One refusal for every redrive-only park (#685): the reason named, then its per-issue move as a sentence.
+const UNANSWERABLE_REFUSALS = {
+  stopped:
+    "`42` is parked (`stopped`) and can't be answered. `vetinari redrive` to resume the campaign, or `vetinari run 42` for a standalone run.",
+  "outdated-agent":
+    "`42` is parked (`outdated-agent`) and can't be answered. Update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then `vetinari redrive`.",
+  conflict: "`42` is parked (`conflict`) and can't be answered. Resolve the conflict on the base, then `vetinari redrive`.",
+};
+for (const [reason, message] of Object.entries(UNANSWERABLE_REFUSALS)) {
+  test(`dispatch answer on a \`${reason}\` record refuses with the one unanswerable-park wording and delivers nothing (#685)`, async () => {
+    const { deps } = makeDeps({
+      hasParked: spy(true) as any,
+      listParked: spy([{ taskId: "42", reason, branch: "agent/42", parkedAt: "t", question: "?" }]) as any,
+    });
+    await assert.rejects(
+      () => dispatch({ kind: "answer", taskId: "42", text: ["do", "it"] }, deps),
+      (err: Error) => err instanceof Refusal && err.message === message,
+    );
+    assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered");
     assert.equal((deps.campaign as any).calls.length, 0);
     assert.equal((deps.runLoop as any).calls.length, 0);
   });
@@ -2065,6 +2088,30 @@ test("dispatch campaign refuses a fresh planned launch over a red-base park, nam
   );
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the red-base park is not archived");
   assert.equal((deps.runCampaignPlan as any).calls.length, 0, "refused before planning");
+  assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("dispatch campaign still refuses a fresh launch over a red-base park whose wave also holds a conflict record (#685)", async () => {
+  // The guard asks the hold over no records, so a record listed in the same wave never masks the red base.
+  const redBaseWithConflict = [
+    { event: "campaign-start", waves: [["436", "438"]] },
+    { event: "wave-start", index: 0, tasks: ["436", "438"] },
+    { event: "green", taskId: "436" },
+    { event: "merged", taskId: "436" },
+    { event: "green", taskId: "438" },
+    { event: "parked", taskId: "438", reason: "conflict" },
+    { event: "campaign-parked", index: 0, reason: "red-base", detail: "merged base gated red" },
+  ];
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseWithConflict) as any,
+    listParked: spy([{ taskId: "438", reason: "conflict", branch: "agent/438", parkedAt: "t", question: "conflict" }]) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+  });
+  await assert.rejects(
+    () => dispatch(campaignCmd({ positional: ["437"] }), deps),
+    (err: Error) => err instanceof Refusal && /red merged base at wave 1/.test(err.message) && /vetinari redrive/.test(err.message),
+  );
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the red-base park is not archived");
   assert.equal((deps.campaign as any).calls.length, 0);
 });
 

@@ -18,6 +18,7 @@ import {
   type MergeConflict,
 } from "./merge.ts";
 import { mergeConflictPrompt, perMergeCheckPrompt } from "./loop.ts";
+import { childStart, encodeChildStart, type ChildStart } from "./child-run.ts";
 import { defaultFileSet, hasFileSetMarker, ticketProse } from "./fileset.ts";
 import {
   UNASKED_PARK_REASONS,
@@ -147,24 +148,25 @@ export async function resolveTitles(cfg: Pick<ResolvedConfig, "fetchTask">, ids:
 }
 
 /**
- * The env a `selfSpawn`ed child gets: the parent's, plus `VETINARI_CHILD` so the
- * child `run` knows it was spawned by a queue/campaign and must not archive the
- * parent's in-flight log as if it were a leftover (`shouldArchiveLeftover`, #150).
+ * The env a `selfSpawn`ed child gets: the parent's, plus its `start` encoded (`encodeChildStart`) —
+ * the child marker, so the child `run` knows it was spawned by a queue/campaign and must not archive
+ * the parent's in-flight log as if it were a leftover (`shouldArchiveLeftover`, #150), and the
+ * session and prompt it resumes with.
  */
-export function childSpawnEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return { ...env, VETINARI_CHILD: "1" };
+export function childSpawnEnv(env: NodeJS.ProcessEnv, start: ChildStart = { kind: "fresh" }): NodeJS.ProcessEnv {
+  return { ...env, ...encodeChildStart(start) };
 }
 
 /**
- * The spawn options a child `run` gets: the {@link childSpawnEnv} env plus `extraEnv`, and its own
+ * The spawn options a child `run` gets: the {@link childSpawnEnv} env for `start`, and its own
  * process group (`detached: true`) so a Ctrl-C or a terminal hang-up reaches only the campaign,
  * which alone decides when its children stop (#403). The child is never `unref()`ed — the campaign
  * still waits for its exit.
  */
-export function childSpawnOptions(env: NodeJS.ProcessEnv, extraEnv?: NodeJS.ProcessEnv): SpawnOptions {
+export function childSpawnOptions(env: NodeJS.ProcessEnv, start?: ChildStart): SpawnOptions {
   return {
     stdio: ["ignore", "inherit", "inherit"],
-    env: { ...childSpawnEnv(env), ...extraEnv },
+    env: childSpawnEnv(env, start),
     detached: true,
   };
 }
@@ -177,8 +179,8 @@ const liveRuns = new Set<ChildProcess>();
  * Re-invoke this CLI as a child, preserving however it was launched (the tsx
  * loader flags live in execArgv). Spawning a bare `node` would fail on TS.
  */
-const selfSpawn = (args: string[], extraEnv?: NodeJS.ProcessEnv) => {
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], childSpawnOptions(process.env, extraEnv));
+const selfSpawn = (args: string[], start?: ChildStart) => {
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], ...args], childSpawnOptions(process.env, start));
   liveRuns.add(child);
   child.on("exit", () => liveRuns.delete(child));
   return child;
@@ -209,23 +211,17 @@ const onProcessStop = (cb: (signal: StopSignal) => void): (() => void) => {
  * the default spawns the real containerized `run` (#151). The exit-code contract is
  * `run`'s: `0` green, `2` parked, anything else an error.
  *
- * `resumeSession` is the crashed session a redrive re-enters this member on (design §7): when
- * set, the child `run` resumes that session on its existing branch instead of a fresh start.
- * `resumePrompt` is the prompt a merge-conflict retry runs with (design §6): the child resumes
- * `resumeSession` with it in place of the crash prompt, or — with no session (a non-resumable
- * provider) — re-enters fresh on the kept branch with it added to the issue text.
+ * `start` is how the member's run starts (`ChildStart`): fresh, resuming the crashed session a
+ * redrive re-enters it on (design §7), or re-entering with a merge-conflict retry's prompt — on its
+ * session, or fresh on the kept branch with no session (a non-resumable provider) (design §6).
  */
-export type RunSpawner = (taskId: string, resumeSession?: string, resumePrompt?: string) => Promise<number | NodeJS.Signals>;
+export type RunSpawner = (taskId: string, start: ChildStart) => Promise<number | NodeJS.Signals>;
 
-/** The production spawner: a real child `run`, resolving on its exit. A crash redrive passes the
- * crashed session id through to the child as `VETINARI_RESUME_SESSION` so it resumes (design §7);
- * a merge-conflict retry passes its prompt as `VETINARI_RESUME_PROMPT` (design §6). */
-const selfSpawnRun: RunSpawner = (taskId, resumeSession, resumePrompt) =>
+/** The production spawner: a real child `run`, resolving on its exit, with its start encoded into
+ * the child's env (`encodeChildStart`). */
+const selfSpawnRun: RunSpawner = (taskId, start) =>
   new Promise((resolve) => {
-    selfSpawn(["run", taskId], {
-      ...(resumeSession ? { VETINARI_RESUME_SESSION: resumeSession } : {}),
-      ...(resumePrompt ? { VETINARI_RESUME_PROMPT: resumePrompt } : {}),
-    }).on("exit", (code, signal) => resolve(code ?? signal!));
+    selfSpawn(["run", taskId], start).on("exit", (code, signal) => resolve(code ?? signal!));
   });
 
 /**
@@ -544,7 +540,7 @@ export async function queue(
           // spawn (fresh, answered re-admit) passes none.
           const resumeSession = readmitted.has(next) ? undefined : resumeSessions[next];
           const resumePrompt = readmitted.has(next) ? undefined : resumePrompts[next];
-          spawnRun(next, resumeSession, resumePrompt)
+          spawnRun(next, childStart(resumeSession, resumePrompt))
             .then((exit) =>
               typeof exit === "string" && halted()
                 ? stoppedRunOutcome(cfg, next, exit, resumeSession)

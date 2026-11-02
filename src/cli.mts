@@ -18,6 +18,7 @@ import {
   type ResolvedConfig,
 } from "./config.ts";
 import { dispatch, parseArgs, type AgentOverride } from "./cli-dispatch.ts";
+import { decodeChildStart } from "./child-run.ts";
 import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
@@ -667,8 +668,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   exit: (c) => process.exit(c),
   selectAgent,
   isCampaignChild: !!process.env.VETINARI_CHILD,
-  resumeSession: process.env.VETINARI_RESUME_SESSION,
-  resumePrompt: process.env.VETINARI_RESUME_PROMPT,
+  childStart: decodeChildStart(process.env),
   archiveLeftoverRun,
   archiveIfIdle,
   // The interactive under-specified halt (terminal only): drop and plan the rest, or stop —

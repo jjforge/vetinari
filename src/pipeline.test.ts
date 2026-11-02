@@ -7,7 +7,8 @@ import type { ResolvedConfig } from "./config.ts";
 import { loggerForRun } from "./log.ts";
 import { readEventLog } from "./event-log.ts";
 import { listOutbox, listParked } from "./state.ts";
-import { BLOCKED, DONE, childRunEntry, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { BLOCKED, DONE, defaultLoopDeps, runLoop, type LoopDeps } from "./loop.ts";
+import { childRunEntry } from "./child-run.ts";
 import { campaign, graceWaitForAnswer, type CampaignDeps, type RunSpawner } from "./modes.ts";
 import { collectWaveChangelog, currentBranch, integrateGreens } from "./merge.ts";
 import { runGates } from "./gate.ts";
@@ -164,8 +165,8 @@ const implScript =
  */
 const localCampaignDeps = (cfg: ResolvedConfig, dir: string, scriptFor: (id: string) => LocalAgentScript = implScript): CampaignDeps => {
   // Enters the loop as the child `run` does: a merge-conflict retry carries its prompt (design §6).
-  const spawnRun: RunSpawner = async (taskId, resumeSession, resumePrompt) => {
-    const outcome = await runLoop(cfg, taskId, undefined, childRunEntry(resumeSession, resumePrompt), loopDepsFor(scriptFor(taskId)));
+  const spawnRun: RunSpawner = async (taskId, start) => {
+    const outcome = await runLoop(cfg, taskId, undefined, childRunEntry(start), loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
   };
   // The merged-base gate: real runGates over the merged base through the local sandbox

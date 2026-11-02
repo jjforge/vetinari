@@ -231,21 +231,6 @@ export const perMergeCheckPrompt = (gate: string, detail: string, base: string, 
       `The tail of ${gate}'s output on the merged tree:\n${detail}`;
 
 /**
- * How a child `run` enters the loop from what its campaign passed it (design §6, §7): a session to
- * resume, with `prompt` when set (a merge-conflict retry) or the crash prompt otherwise (a crash
- * redrive); a `prompt` with no session (a non-resumable provider) is a fresh run on the kept branch
- * with the prompt added to the issue text, as `freshRedReentry` does; neither is a fresh run.
- */
-export function childRunEntry(resumeSession: string | undefined, prompt: string | undefined): ResumeEntry | ReentryEntry | undefined {
-  if (resumeSession) return { resumeSessionId: resumeSession, answerPrompt: prompt ?? crashResumePrompt() };
-  if (prompt)
-    return {
-      reentry: `---\n\n(Continuing earlier work on this task — a fresh run. Your prior commits are already on this branch.)\n\n${prompt}`,
-    };
-  return undefined;
-}
-
-/**
  * The `stalled/no-commit` park's question. No commit ahead of the base is not "no change": the
  * worktree may hold uncommitted work, so it reports what `git status --porcelain` saw (the first
  * five paths), and only a clean worktree is called a no-op. It names COMPLETE only when the

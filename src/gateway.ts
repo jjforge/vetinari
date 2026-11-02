@@ -1,6 +1,6 @@
 /**
- * The gateway's routing logic: the send-time reply index, poll-target dedupe,
- * announcement selection, and reply routing. All pure so it is testable without
+ * The gateway's routing logic: poll-target dedupe and reply routing, over the
+ * reply index (`reply-index.ts`), which selects what to announce. All pure so it is testable without
  * Telegram or spawned processes; the daemon (`gateway`) is the thin impure glue
  * that wires these to the real send/poll helpers and the shared install.
  *
@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { isIssueToken, normalize } from "./issue-id.ts";
-import { ANSWER_SOURCE_ENV_VAR, questionDestinations, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
+import { ANSWER_SOURCE_ENV_VAR, resolveDestination, type Destination, type NotifyMap } from "./config.ts";
 import { hostLogger, type Logger } from "./log.ts";
 import {
   listOutboxIn,
@@ -19,8 +19,6 @@ import {
   markOutboundSent,
   outboxDirOf,
   parkedDirOf,
-  setParkedMessageId,
-  UNASKED_PARK_REASONS,
   type OutboundRecord,
   type ParkedRecord,
   type ParkReason,
@@ -43,6 +41,7 @@ import {
   type IssueStatus,
 } from "./status.ts";
 import { listDockerBridgeSubnets } from "./docker-peers.ts";
+import { newReplyIndex, questionDestinationName, type ReplyIndex } from "./reply-index.ts";
 import { TG_POLL_TIMEOUT_S, botId, newPollBackoff, tgPoll, tgSend, type TgConn, type TgFailure, type TgMsg } from "./telegram.ts";
 
 /**
@@ -242,79 +241,9 @@ export interface SendRef {
   parkedAt: string;
 }
 
-/**
- * The send-time index: `(botToken, chat, messageId) → SendRef`, built as the gateway
- * announces each question and read to route an incoming reply. It is a cache
- * rebuilt on startup from persisted parked records (which carry their announced
- * message id), so it holds no durable state of its own — parked records remain
- * the source of truth (ADR 0002).
- *
- * `announced` is the in-memory guard against re-announcing a question already
- * sent this session, keyed by the specific park event so a re-park announces anew.
- */
-export interface ReplyIndex {
-  byMessage: Map<string, SendRef>;
-  announced: Set<string>;
-}
-
-export const newReplyIndex = (): ReplyIndex => ({ byMessage: new Map(), announced: new Set() });
-
-// NUL-joined keys: a Telegram message id is unique only within a chat, so a reply
-// is keyed by bot token, chat and message id — two chats heard on one bot (a
-// shared bot, a separate `question` destination) cannot collide.
+// A NUL-joined key for a pending prune confirmation: a Telegram message id is unique
+// only within a chat, so it is keyed by bot token, chat and message id.
 const messageKey = (conn: Pick<TgConn, "token" | "chat">, messageId: number) => `${conn.token}\0${conn.chat}\0${messageId}`;
-const announceKey = (project: string, task: string, parkedAt: string) => `${project}\0${task}\0${parkedAt}`;
-
-/** Record that a question for `ref` was announced as `messageId` in `conn`'s chat on its bot. */
-export function recordSend(index: ReplyIndex, conn: Pick<TgConn, "token" | "chat">, messageId: number, ref: SendRef): void {
-  index.byMessage.set(messageKey(conn, messageId), ref);
-  index.announced.add(announceKey(ref.project, ref.task, ref.parkedAt));
-}
-
-/** The project+task a reply belongs to, or null when no question matches it. */
-export function resolveReply(index: ReplyIndex, conn: Pick<TgConn, "token" | "chat">, messageId: number): SendRef | null {
-  return index.byMessage.get(messageKey(conn, messageId)) ?? null;
-}
-
-const isAnnounced = (index: ReplyIndex, project: string, task: string, parkedAt: string) =>
-  index.announced.has(announceKey(project, task, parkedAt));
-
-/**
- * Drop every index entry whose parked record is gone or was re-parked, so the
- * running index holds no more than `rebuildIndex` would build from `projects`
- * (ADR 0002) — a reply to an evicted question is `unrouted`, as after a restart.
- *
- * `projects` is the set loaded at the start of the tick, before this tick's own
- * announcements stamped their message ids, so a record with no `tgMessageId` yet
- * keeps its entries. A project absent from `projects` (unreadable pointer, vanished
- * base location) keeps all its entries until the next restart.
- */
-export function reconcileReplyIndex(index: ReplyIndex, projects: GatewayProject[]): void {
-  const loaded = new Map(projects.map((p) => [p.project, p]));
-  const recordFor = (p: GatewayProject, task: string, parkedAt: string) =>
-    p.parked.find((r) => r.taskId === task && r.parkedAt === parkedAt);
-
-  for (const [key, ref] of index.byMessage) {
-    const p = loaded.get(ref.project);
-    if (!p) continue;
-    const [token, , id] = key.split("\0");
-    const messageId = Number(id);
-    const record = recordFor(p, ref.task, ref.parkedAt);
-    const live =
-      p.conn?.token === token &&
-      record != null &&
-      !UNASKED_PARK_REASONS.has(record.reason) &&
-      (record.tgMessageId == null || record.tgMessageId === messageId);
-    if (!live) index.byMessage.delete(key);
-  }
-
-  for (const key of index.announced) {
-    const [project, task, parkedAt] = key.split("\0");
-    const p = loaded.get(project);
-    if (!p) continue;
-    if (!p.conn || !recordFor(p, task, parkedAt)) index.announced.delete(key);
-  }
-}
 
 /**
  * A prune awaiting its confirming `yes`: the resolved project and the issue to
@@ -372,8 +301,8 @@ export function newPendingConfirms(now: () => number, ttlMs: number = CONFIRM_TT
 
 /**
  * A parked question the gateway must still announce: the project's destination
- * and the record to send. The daemon sends each, writes the returned message id
- * back into the record, and records it in the index.
+ * and the record to send. The daemon sends each and records the returned message
+ * id in the index, which stamps it back into the record.
  */
 export interface Announcement {
   project: string;
@@ -381,54 +310,6 @@ export interface Announcement {
   baseLocation: string;
   conn: TgConn;
   record: ParkedRecord;
-}
-
-/**
- * Where a project's park announcements are sent: the destination its `question`
- * routing key resolves to (its chat/thread on the project's bot), or the project's
- * default connection when no map (or no wildcard) routes it — never
- * unconditionally to the default chat (design §10). `undefined` only when the
- * project configures no Telegram at all. The `question` key is validated to a
- * single destination at config load (`questionDestinations`), so this reads that
- * one destination and rides the project's own bot token. Pure, so the selection
- * stays testable without a send.
- */
-export function resolveQuestionConn(project: GatewayProject): TgConn | undefined {
-  if (!project.conn) return undefined;
-  const name = questionDestinationName(project);
-  const named = name ? project.destinations?.[name] : undefined;
-  return named ? { token: project.conn.token, chat: named.chat, thread: named.thread } : project.conn;
-}
-
-/** The single destination name a project's `question` key resolves to, if any. */
-function questionDestinationName(project: GatewayProject): string | undefined {
-  const dests = questionDestinations(project.notify ?? {});
-  return dests.size === 1 ? [...dests][0] : undefined;
-}
-
-/**
- * The parked records not yet announced: those with no persisted message id and
- * not already announced this session (the index guard). A project with no
- * destination is skipped — there is nowhere to route its reply. Each pending
- * announcement carries the connection its `question` key resolves to
- * (`resolveQuestionConn`), so the park lands where the reply is watched. Pure, so
- * the daemon can act on the result and the selection stays trivially testable.
- */
-export function pendingAnnouncements(projects: GatewayProject[], index: ReplyIndex): Announcement[] {
-  const out: Announcement[] = [];
-  for (const p of projects) {
-    const conn = resolveQuestionConn(p);
-    if (!conn) continue;
-    for (const record of p.parked) {
-      // A `stopped` or `outdated-agent` record is never announced (and cannot be answered) — only
-      // the campaign-level park notice goes out; its resume move is a redrive or `vetinari run <id>` (#403, #444).
-      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
-      if (record.tgMessageId != null) continue;
-      if (isAnnounced(index, p.project, record.taskId, record.parkedAt)) continue;
-      out.push({ project: p.project, projectRoot: p.projectRoot, baseLocation: p.baseLocation, conn, record });
-    }
-  }
-  return out;
 }
 
 /**
@@ -580,7 +461,7 @@ export function routeReply(index: ReplyIndex, pending: PendingConfirms, conn: Tg
       const confirm = pending.resolve(heardIn, msg.replyToId);
       if (confirm) return { kind: "confirm", confirm };
     }
-    const ref = resolveReply(index, heardIn, msg.replyToId);
+    const ref = index.resolveReply(heardIn, msg.replyToId);
     if (ref) return { kind: "resume", ref, text: msg.text };
   }
   return { kind: "unrouted" };
@@ -949,36 +830,6 @@ export async function supervisePolls(
 }
 
 /**
- * Rebuild the send-time index from persisted parked records on startup: every
- * record that carries an announced message id (and whose project has a bot) is
- * re-recorded, so a restart re-announces nothing and still routes a reply that
- * arrived while the gateway was down. Parked records are the source of truth; the
- * index is only their in-memory projection (ADR 0002).
- */
-export function rebuildIndex(projects: GatewayProject[]): ReplyIndex {
-  const index = newReplyIndex();
-  for (const p of projects) {
-    // Keyed by the chat the question was announced in — re-derived from the current `question` routing.
-    const conn = resolveQuestionConn(p);
-    if (!conn) continue;
-    for (const record of p.parked) {
-      // A `stopped`/`outdated-agent` record was never announced, so there is no reply to route back
-      // to it — skip it on rebuild too, mirroring `pendingAnnouncements`.
-      if (UNASKED_PARK_REASONS.has(record.reason)) continue;
-      if (record.tgMessageId == null) continue;
-      recordSend(index, conn, record.tgMessageId, {
-        project: p.project,
-        task: record.taskId,
-        projectRoot: p.projectRoot,
-        baseLocation: p.baseLocation,
-        parkedAt: record.parkedAt,
-      });
-    }
-  }
-  return index;
-}
-
-/**
  * When the gateway's loops last completed a pass — the mutable record `/healthz` reads.
  * `announce` is the last announce pass that did not throw; `polls` holds one entry per
  * running poll loop, keyed by token, dropped when the loop's signal fires — the supervisor
@@ -1080,31 +931,24 @@ const announceText = (a: Announcement) => formatParkAnnouncement(a.project, a.re
 
 /**
  * Announce every parked question not yet sent to its project's destination, then
- * stamp the returned message id into the live index (which routes the reply) and
- * then back into the record (which persists "announced" and feeds a later index
- * rebuild). A failed persist is logged and the next announcement carries on; the
+ * record each in the index, which registers its route and session guard and then
+ * stamps the message id into the record (persisting "announced" for a later
+ * restart). A failed persist is logged and the next announcement carries on; the
  * question is not re-sent this session, only after a restart. The caller loads `projects` fresh each tick so questions parked since the
  * last tick are picked up. Idempotent: a record that already has a message id is never re-announced.
  */
 async function announcePending(projects: GatewayProject[], index: ReplyIndex, logger: Logger = hostLogger()): Promise<void> {
-  for (const a of pendingAnnouncements(projects, index)) {
+  for (const a of index.pending(projects)) {
     const messageId = await tgSend(a.conn, announceText(a));
     if (messageId == null) {
       logger.log("gateway-announce-failed", { project: a.project, task: a.record.taskId });
       continue;
     }
-    // Route and guard first: the send has landed, so a persist that throws (an unwritable
-    // parked dir, a parked lock that gives up) must neither re-send it next tick nor abort the tick.
-    recordSend(index, a.conn, messageId, {
-      project: a.project,
-      task: a.record.taskId,
-      projectRoot: a.projectRoot,
-      baseLocation: a.baseLocation,
-      parkedAt: a.record.parkedAt,
-    });
     logger.log("gateway-announced", { project: a.project, task: a.record.taskId, messageId });
+    // The index routes and guards before it persists: the send has landed, so a persist that throws
+    // (an unwritable parked dir, a parked lock that gives up) must neither re-send it next tick nor abort the tick.
     try {
-      setParkedMessageId(parkedDirOf(a.baseLocation), a.record.taskId, messageId);
+      index.recordAnnouncement(a, messageId);
     } catch (e) {
       logger.log("gateway-announce-persist-failed", { project: a.project, task: a.record.taskId, messageId, error: String(e) });
     }
@@ -1112,13 +956,13 @@ async function announcePending(projects: GatewayProject[], index: ReplyIndex, lo
 }
 
 /**
- * One announce tick over one loaded set: announce what is pending, then reconcile
- * the index against that same pre-announce set (see `reconcileReplyIndex`), so the
- * running index never holds more than a restart would rebuild.
+ * One announce tick over one loaded set: announce what is pending, then update the
+ * index for that same pre-announce set (`ReplyIndex.tick`), so the running index
+ * routes what a restart would rebuild.
  */
 export async function announceTick(projects: GatewayProject[], index: ReplyIndex, logger: Logger): Promise<void> {
   await announcePending(projects, index, logger);
-  reconcileReplyIndex(index, projects);
+  index.tick(projects);
 }
 
 /**
@@ -1236,7 +1080,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   // The host daemon spans every project and has no per-run cfg.logFile, so it
   // emits to the persistent host log (`hostLogTarget`), threaded through its helpers.
   const log = hostLogger();
-  const index = rebuildIndex(loadGatewayProjects(configDir));
+  const index = newReplyIndex(loadGatewayProjects(configDir));
   // Non-durable by design (ADR 0002): a restart drops pending prune
   // confirmations, and re-sending `prune 640` is the recovery.
   const pending = newPendingConfirms(() => Date.now());
@@ -1279,8 +1123,7 @@ export async function gateway(configDir: string = gatewayConfigDir()): Promise<v
   const announcing = (async () => {
     for (;;) {
       try {
-        // One load per tick, shared by the announce and the reconcile that follows it: the
-        // reconcile must see the same pre-announce set (see `reconcileReplyIndex`).
+        // One load per tick, shared by the announce and the index tick that follows it.
         const projects = loadGatewayProjects(configDir);
         logNoConnectionSkips(projects, skippedNoConn, log);
         await announceTick(projects, index, log);

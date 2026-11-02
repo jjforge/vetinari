@@ -4,13 +4,10 @@ import { existsSync, mkdirSync, readFileSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  AGENT_ENV_VAR,
-  encodeAgentOverride,
   loadConfig,
   missingCredentials,
   missingCredentialsRefusal,
   refuseVetinariSecretsInEnv,
-  parseAgentOverride,
   repoForProject,
   resolveAgentSelection,
   resolveConfigPath,
@@ -18,7 +15,7 @@ import {
   type ResolvedConfig,
 } from "./config.ts";
 import { dispatch, parseArgs, type AgentOverride } from "./cli-dispatch.ts";
-import { decodeChildStart } from "./child-run.ts";
+import { decodeChildStart, isCampaignChildRun, readAgentOverride, stampAgentOverride } from "./child-run.ts";
 import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
@@ -622,7 +619,7 @@ const archiveIfIdle = () => {
 // (#141, #383). A child `run` spawned by a queue/campaign (VETINARI_CHILD) never
 // archives — the "leftover" it would see is its own parent's in-flight log (#150).
 const archiveLeftoverRun = () => {
-  const isChild = !!process.env.VETINARI_CHILD;
+  const isChild = isCampaignChildRun();
   if (!shouldArchiveLeftover(cfg, { isChild })) return;
   if (listParked(cfg).length) return;
   doArchive();
@@ -640,7 +637,7 @@ const archiveLeftoverRun = () => {
  * agent. This is `dispatch`'s `selectAgent` dep.
  */
 function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
-  const inherited = parseAgentOverride(process.env[AGENT_ENV_VAR]);
+  const inherited = readAgentOverride();
   const merged = { ...inherited, ...override };
   const selection = resolveAgentSelection(cfg.agent, merged); // throws on bad provider/effort
   const envPath = resolve(process.cwd(), cfg.stateDir, ".env");
@@ -648,7 +645,7 @@ function selectAgent(cfg: ResolvedConfig, override: AgentOverride): void {
   const missing = missingCredentials(selection.provider, envPath);
   if (missing.length)
     throw new Refusal(missingCredentialsRefusal(selection.provider, envPath, existsSync(envPath) ? readFileSync(envPath, "utf8") : ""));
-  if (Object.keys(merged).length) process.env[AGENT_ENV_VAR] = encodeAgentOverride(merged);
+  stampAgentOverride(merged);
 }
 
 // The post-config command family (build/baseline/run/campaign/redrive/prune/graft/replan/
@@ -667,7 +664,7 @@ await dispatch(parseArgs([mode, ...rest]), {
   },
   exit: (c) => process.exit(c),
   selectAgent,
-  isCampaignChild: !!process.env.VETINARI_CHILD,
+  isCampaignChild: isCampaignChildRun(),
   childStart: decodeChildStart(process.env),
   archiveLeftoverRun,
   archiveIfIdle,

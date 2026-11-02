@@ -24,7 +24,7 @@ import type { build, baseline, campaign, tgTest, requireTelegram, readImageFresh
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import type { runLoop, Outcome } from "./loop.ts";
-import { childRunEntry, type ChildStart } from "./child-run.ts";
+import { childRunEntry, enableJsonOutput, type ChildStart } from "./child-run.ts";
 import {
   isPathEscapingTaskId,
   type answerParked,
@@ -69,13 +69,13 @@ export const identityLine = (project: string, repo: string | undefined, id: stri
 };
 
 /**
- * Turn on `--json` for the raw-event stream: set the `VETINARI_JSON` env the run logger keys its
- * stdout echo on (`log.ts`) — and which child wave `run`s inherit — so `campaign`/`run`/`redrive`
+ * Turn on `--json` for the raw-event stream (`enableJsonOutput`): the run logger keys its stdout
+ * echo on it (`log.ts`) — and child wave `run`s inherit it — so `campaign`/`run`/`redrive`
  * stream JSONL to stdout for tooling. Left unset, no JSON reaches stdout: the terminal view is the
  * `report.ts` human lines alone (design §11, #299).
  */
 const enableJson = (on: boolean): void => {
-  if (on) process.env.VETINARI_JSON = "1";
+  if (on) enableJsonOutput();
 };
 
 /** A partial `--agent`/`--model`/`--effort` override, as `parseAgentFlags` yields it. */

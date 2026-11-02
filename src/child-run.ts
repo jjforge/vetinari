@@ -4,6 +4,7 @@
  * verdict a child's exit decodes to, and the one writer of a `stopped` park. The env transport lives
  * here alone — no other source reads or writes these `VETINARI_*` names.
  */
+import { encodeAgentOverride, parseAgentOverride } from "./config.ts";
 import { crashResumePrompt, type ReentryEntry, type ResumeEntry } from "./loop.ts";
 
 /**
@@ -48,4 +49,39 @@ export function childRunEntry(start: ChildStart): ResumeEntry | ReentryEntry | u
   return {
     reentry: `---\n\n(Continuing earlier work on this task — a fresh run. Your prior commits are already on this branch.)\n\n${start.prompt}`,
   };
+}
+
+/** Was this process spawned as a campaign/queue child `run`? Every encoded start carries the marker. */
+export function isCampaignChildRun(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !!env.VETINARI_CHILD;
+}
+
+/**
+ * Is `--json` on: the raw event JSONL streamed to stdout for tooling, in place of the human lines
+ * (design §11, #299)? Read live, since `enableJsonOutput` turns it on mid-run during dispatch.
+ */
+export function isJsonOutput(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VETINARI_JSON === "1";
+}
+
+/** Turn `--json` on for this process and, by inheritance, every child `run` it spawns. */
+export function enableJsonOutput(env: NodeJS.ProcessEnv = process.env): void {
+  env.VETINARI_JSON = "1";
+}
+
+/**
+ * The env var a `run`/`campaign` invocation stamps its CLI agent override onto, so campaign/queue
+ * CHILD `run`s inherit it and drive the SAME agent as the parent instead of silently falling back to
+ * the config default (ADR 0016).
+ */
+export const AGENT_ENV_VAR = "VETINARI_AGENT";
+
+/** The CLI agent override this process was launched or spawned with (ADR 0016); unset or junk → `{}`. */
+export function readAgentOverride(env: NodeJS.ProcessEnv = process.env): ReturnType<typeof parseAgentOverride> {
+  return parseAgentOverride(env[AGENT_ENV_VAR]);
+}
+
+/** Stamp a non-empty agent override on this process, so every child `run` it spawns inherits it. */
+export function stampAgentOverride(over: Parameters<typeof encodeAgentOverride>[0], env: NodeJS.ProcessEnv = process.env): void {
+  if (Object.keys(over).length) env[AGENT_ENV_VAR] = encodeAgentOverride(over);
 }

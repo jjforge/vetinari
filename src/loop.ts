@@ -20,6 +20,7 @@ import { hostSecretsPath, parseEnvFile } from "./registry.ts";
 import { activityLoggingSink, appendActivity, initActivityLog } from "./activity.ts";
 import { event, readEventLog } from "./event-log.ts";
 import { withHostSlot, type HostCeiling } from "./lease.ts";
+import { isCampaignChildRun, isJsonOutput } from "./child-run.ts";
 
 /**
  * The files a single commit touched, from the host repo (the agent branch's objects share the host
@@ -82,9 +83,9 @@ const firstLine = (s: string): string =>
  * once per verdict from the run loop's failed/parked paths, so a park never prints twice.
  */
 function printVerdict(reason: string, nextStep: string) {
-  if (process.env.VETINARI_JSON === "1") return;
+  if (isJsonOutput()) return;
   console.log(`\n*** ${reason}\n`);
-  if (!process.env.VETINARI_CHILD) console.log(`${nextStep}\n`);
+  if (!isCampaignChildRun()) console.log(`${nextStep}\n`);
 }
 
 /**
@@ -673,14 +674,14 @@ async function declareGreen(s: RunState, sbx: Sandbox, r: any, sessionId: string
   cfg.log.log("green", { taskId, branch: sbx.branch, commits: (r.commits ?? []).map((c: any) => c.sha) });
   // The human GREEN banner is the terminal view (design §11); under --json the screen is
   // the raw event stream alone, so keep it out to leave the JSONL clean for tooling (#299).
-  if (process.env.VETINARI_JSON !== "1") {
+  if (!isJsonOutput()) {
     console.log(`\n*** GREEN — commits on ${sbx.branch}\n`);
     // A run banks work on its branch and merges nothing — integration (the merge and the
     // merged-base gate) is the campaign's, so say so lest the branch read as a finished
     // issue (#339). Suppressed for a campaign's OWN child run: telling a wave member to go
-    // run `campaign` is nonsense. The child marker is the same VETINARI_CHILD the host-lease
+    // run `campaign` is nonsense. The child marker is the same `isCampaignChildRun` the host-lease
     // exemption in runLoop reads — one discriminator, not two.
-    if (!process.env.VETINARI_CHILD)
+    if (!isCampaignChildRun())
       console.log(`Not merged — the commits are banked on ${sbx.branch}. Integrate them with: campaign ${taskId}\n`);
   }
   enqueueOutbound(
@@ -903,7 +904,7 @@ export async function runLoop(
     // unlogged promise (design §3 step 9). The `wait` races the stop, so a run signalled while it
     // waits first-come for a slot takes none and unwinds to `parkStopped` — withHostSlot's own
     // `finally` deregisters its lease on the way out.
-    return await (host && !process.env.VETINARI_CHILD
+    return await (host && !isCampaignChildRun()
       ? withHostSlot(host, cfg.project, container, { wait: (ms) => s.stoppable(sleep(ms)) })
       : container());
   } catch (err: any) {

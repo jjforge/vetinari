@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_ENV_VAR } from "./config.ts";
+import { AGENT_ENV_VAR } from "./child-run.ts";
 import {
   agentFor,
   ensureMountSources,

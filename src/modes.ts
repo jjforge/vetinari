@@ -18,7 +18,7 @@ import {
   type MergeConflict,
 } from "./merge.ts";
 import { mergeConflictPrompt, perMergeCheckPrompt } from "./loop.ts";
-import { childStart, encodeChildStart, type ChildStart } from "./child-run.ts";
+import { childStart, encodeChildStart, isJsonOutput, type ChildStart } from "./child-run.ts";
 import { defaultFileSet, hasFileSetMarker, ticketProse } from "./fileset.ts";
 import {
   UNASKED_PARK_REASONS,
@@ -86,11 +86,11 @@ const named = (name?: string): string => (name ? ` “${name}”` : "");
 
 /**
  * The terminal reporter for a run/campaign's human lines (design §11): human-readable by
- * default, and silent under `--json` — the same `VETINARI_JSON` env the logger's raw-JSONL
+ * default, and silent under `--json` — the same `isJsonOutput` the logger's raw-JSONL
  * echo keys on, so the screen is one or the other, never both. Read at call time so a child
  * spawn (which inherits the env) reports the same way its parent does (#299).
  */
-const envReporter = (): Reporter => makeReporter({ json: process.env.VETINARI_JSON === "1" });
+const envReporter = (): Reporter => makeReporter({ json: isJsonOutput() });
 
 /**
  * Print a settling wave's slow-gate lines (#445) beside its settle line — the wave-done or the stop.

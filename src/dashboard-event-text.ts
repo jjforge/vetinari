@@ -4,7 +4,7 @@
  * never imports `dashboard-model.ts` or `status.ts` (both re-export it), so no cycle forms.
  */
 import { festiveWaveName } from "./festive-names.ts";
-import type { GreenEvent, OrchestratorEvent } from "./event-log.ts";
+import type { GreenEvent, MergedEvent, OrchestratorEvent } from "./event-log.ts";
 import type { ParkedRecord } from "./state.ts";
 import { hash, normalize } from "./issue-id.ts";
 
@@ -39,7 +39,7 @@ export function festiveFromCookie(cookieHeader: string | undefined, fallback = f
  * for a merge that names its issue only through the branch (`agent/<id>`, the
  * campaign wave-merge / per-issue green path) — the id embedded in that branch.
  * Keeps the feed from rendering `#undefined` when only the branch carries it. */
-const mergedIssue = (e: GreenEvent): string | undefined => {
+const mergedIssue = (e: GreenEvent | MergedEvent): string | undefined => {
   if (e?.taskId != null && String(e.taskId) !== "") return normalize(String(e.taskId));
   const tail = e?.branch != null ? String(e.branch).split("/").pop() : "";
   return tail ? normalize(tail) : undefined;
@@ -142,6 +142,11 @@ export function describeEvent(e: OrchestratorEvent, opts: { festive?: { offset: 
       return `${e.name ? `Campaign “${e.name}”` : "Campaign"} complete (${n} wave${n === 1 ? "" : "s"})`;
     }
     case "green": {
+      const id = mergedIssue(e);
+      return id ? `#${id} passed its gates — waiting to merge` : "passed its gates — waiting to merge";
+    }
+    // Only a merge onto the base says "merged"; a redrive's `alreadyMerged` re-log reads the same.
+    case "merged": {
       const id = mergedIssue(e);
       return id ? `#${id} merged` : "merged";
     }

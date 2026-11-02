@@ -229,14 +229,17 @@ export function humanizeLogLine(raw: string): HumanizedRow {
         actor: actorOf(e.taskId),
         verb: ok ? "gate passed" : "gate failed",
         spans: [code(String(e.cmd)), plain(tail)],
-        dot: ok ? "merged" : "failure",
+        dot: ok ? "running" : "failure",
       };
     }
     case "turn": {
       const summary = typeof e.summary === "string" ? e.summary.trim() : "";
       return { time, actor: actorOf(e.taskId), verb: "turn " + (e.turn ?? "?"), spans: summary ? [strong(summary)] : [], dot: "running" };
     }
+    // A green passed its gates but is not on the base yet (CONTEXT.md: still running, waiting to
+    // merge); only the `merged` event that follows says "merged".
     case "green":
+      return { time, actor: actorOf(e.taskId), verb: "passed its gates", spans: [plain("— waiting to merge")], dot: "running" };
     case "merged":
       return { time, actor: actorOf(e.taskId), verb: "merged", spans: [], dot: "merged" };
     // A merge-conflict park carries reason `conflict` (design §2.3); the log names it

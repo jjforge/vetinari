@@ -17,8 +17,9 @@ import { Refusal } from "./refusal.ts";
  * - `conflict` — the integrator hit a merge conflict; a human resolves and redrives.
  * - `red-base` — the merged base gated red; fix-forward or prune, then redrive.
  * - `crash`    — reconciliation found a dead run with no stop marker since the latest `wave-start`; redrive.
- * - `stopped`  — a person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
- *   kept. It cannot be answered — `vetinari run <id>` continues a standalone run, a redrive a campaign.
+ * - `stopped`  — a person stopped the run (SIGINT/SIGTERM, or SIGHUP from a closed terminal) before it
+ *   reached a verdict; its work is kept. It cannot be answered — `vetinari run <id>` continues a
+ *   standalone run, a redrive a campaign.
  * - `outdated-agent` — the agent CLI is too old for the model; update the agent CLI (`vetinari
  *   build` for the default Docker image), then redrive. Like `stopped`, it cannot be answered.
  */

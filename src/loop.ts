@@ -55,7 +55,7 @@ export const BLOCKED = "<promise>BLOCKED</promise>";
 
 export type Outcome = "green" | "parked" | "failed";
 
-/** Thrown internally when a SIGINT/SIGTERM lands before the run reached a verdict (this issue):
+/** Thrown internally when a SIGINT/SIGTERM/SIGHUP lands before the run reached a verdict (this issue):
  * it unwinds the in-flight turn — abandoning the agent call, not awaiting it — so the sole outer
  * handler closes the sandbox and parks `stopped`. Never leaves `runLoop`; it is caught there. */
 class StopRequested extends Error {
@@ -143,22 +143,26 @@ export interface LoopDeps {
   commitsAhead: (base: string, branch: string, log: Logger) => number | null;
   filesInCommit: (sha: string, log: Logger) => string[];
   /**
-   * Install the per-run stop handler: register `cb` for SIGINT and SIGTERM, returning an
-   * unsubscribe that removes it (this issue). The default registers on `process`; a test drives
-   * a stop through this seam rather than with a real signal. `runLoop` installs when it starts and
-   * unsubscribes when it returns, so the handler lives exactly as long as the run.
+   * Install the per-run stop handler: register `cb` for SIGINT, SIGTERM and SIGHUP (a closed
+   * terminal), returning an unsubscribe that removes it (this issue). The default registers on
+   * `process`; a test drives a stop through this seam rather than with a real signal. `runLoop`
+   * installs when it starts and unsubscribes when it returns, so the handler lives exactly as long
+   * as the run.
    */
-  onStop: (cb: (signal: "SIGINT" | "SIGTERM") => void) => () => void;
+  onStop: (cb: (signal: StopSignal) => void) => () => void;
 }
 
 const onStopDefault: LoopDeps["onStop"] = (cb) => {
   const onSigint = () => cb("SIGINT");
   const onSigterm = () => cb("SIGTERM");
+  const onSighup = () => cb("SIGHUP");
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigterm);
+  process.on("SIGHUP", onSighup);
   return () => {
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
+    process.off("SIGHUP", onSighup);
   };
 };
 
@@ -451,7 +455,7 @@ async function harvestFindings(
   }
 }
 
-type StopSignal = "SIGINT" | "SIGTERM";
+type StopSignal = "SIGINT" | "SIGTERM" | "SIGHUP";
 
 /**
  * One `runLoop` call's shared mutable state, threaded through its phase helpers. The per-run stop
@@ -927,7 +931,7 @@ export async function runLoop(
     if (err instanceof StopRequested) return await parkStopped(s);
     return await failRun(s, err);
   } finally {
-    // Remove the SIGINT/SIGTERM handler whichever way the run ended — green, parked, failed, or
+    // Remove the SIGINT/SIGTERM/SIGHUP handler whichever way the run ended — green, parked, failed, or
     // stopped — so it never outlives the run (design: installed at start, removed on return).
     unsubscribe();
   }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { register } from "./registry.ts";
@@ -505,6 +505,45 @@ test("announceTick evicts a question whose parked record is gone and keeps the o
 
   assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 100), null, "the gone question is evicted");
   assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 200)?.task, "A1", "the question announced this tick still resolves");
+});
+
+// A persist failure after a landed send must not re-send the question, nor abort the tick (#700).
+// The parked dir must exist (`setParkedMessageId` is a no-op without it); read-only makes the persist throw.
+const unwritableParkedBase = (t: { after: (fn: () => void) => void }, name: string) => {
+  const base = join(tmpdir(), `vetinari-announce-persist-${process.pid}-${++gwCounter}-${name}`);
+  const dir = join(base, "parked");
+  mkdirSync(dir, { recursive: true });
+  chmodSync(dir, 0o500);
+  t.after(() => {
+    chmodSync(dir, 0o700);
+    rmSync(base, { recursive: true, force: true });
+  });
+  return base;
+};
+
+const countingTgSend = (t: { after: (fn: () => void) => void }) => {
+  const saved = globalThis.fetch;
+  const sent: string[] = [];
+  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+    sent.push(String((JSON.parse(init.body) as { text: string }).text));
+    return { json: async () => ({ ok: true, result: { message_id: 200 + sent.length } }) };
+  }) as unknown as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = saved;
+  });
+  return sent;
+};
+
+test("announceTick sends a question once across ticks when persisting its message id fails, and its reply still routes", async (t) => {
+  const sent = countingTgSend(t);
+  const projects = [alpha({ baseLocation: unwritableParkedBase(t, "once"), parked: [parked({ taskId: "A1", parkedAt: "t1" })] })];
+  const index = newReplyIndex();
+
+  await announceTick(projects, index, memoryLogger());
+  await announceTick(projects, index, memoryLogger());
+
+  assert.equal(sent.length, 1, "the question is sent exactly once");
+  assert.equal(resolveReply(index, { token: "botA", chat: "-1" }, 201)?.task, "A1", "a reply to that message routes to its question");
 });
 
 test("pendingAnnouncements routes a park to the chat/thread its question key resolves through notify", () => {

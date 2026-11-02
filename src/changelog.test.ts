@@ -110,7 +110,7 @@ test("collectFragments folds into today's top milestone, one block per label, ca
       { section: "Improvements", bullets: ["- [user] a refinement (#4)."] },
     ],
     "August 26, 2026",
-    "ignored because the top milestone already matches today",
+    "Today's work",
   );
   // Only one milestone heading — we folded into the existing one, not a new one.
   assert.equal(out.match(/^### /gm)?.length, 1);
@@ -138,12 +138,7 @@ test("collectFragments keeps a consuming project's extra section labels in their
 **Documentation:**
 - [internal] a doc (#2)
 `;
-  const out = collectFragments(
-    today,
-    [{ section: "Testing", bullets: ["- [internal] a test (#3)."] }],
-    "August 26, 2026",
-    "ignored — the top milestone is today's",
-  );
+  const out = collectFragments(today, [{ section: "Testing", bullets: ["- [internal] a test (#3)."] }], "August 26, 2026", "Today's work");
   // Security stays above Documentation, and the new Testing block lands between them.
   assert.ok(out.indexOf("**Security:**") < out.indexOf("**Testing:**"));
   assert.ok(out.indexOf("**Testing:**") < out.indexOf("**Documentation:**"));
@@ -180,14 +175,14 @@ test("collectFragments adds no label for a bullet-less section when starting a n
 
 test("collectFragments adds no label for a bullet-less section when folding into today's milestone", () => {
   const today = "# Changelog\n\n### Today's work — August 26, 2026\n\n**New features:**\n- [user] a feature (#2)\n";
-  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "ignored");
+  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "Today's work");
   assert.ok(out.includes("**Bug fixes:**\n- [user] a fix (#1)."));
   assert.ok(!out.includes("**Documentation:**"));
 });
 
 test("collectFragments leaves today's existing block untouched for a bullet-less section of its label", () => {
   const today = "# Changelog\n\n### Today's work — August 26, 2026\n\n**Documentation:**\n- [internal] a doc (#2)\n";
-  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "ignored");
+  const out = collectFragments(today, parseFragment(MIXED_FRAGMENT), "August 26, 2026", "Today's work");
   assert.equal(
     out,
     "# Changelog\n\n### Today's work — August 26, 2026\n\n**Bug fixes:**\n- [user] a fix (#1).\n\n**Documentation:**\n- [internal] a doc (#2)\n",
@@ -407,4 +402,80 @@ test("changelog collect prints no near-miss line when there are none", () => {
 
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout, "nothing to collect — changelog.d/ has no fragments.\n");
+});
+
+test("collectFragments never adds to a release milestone dated today — it starts a Collected changes milestone above it", () => {
+  const release = [
+    "### v0.3.0 — November 1, 2026",
+    "",
+    "Tags a known-good working version, including **Breaking changes** to the reply helpers (#660).",
+    "",
+    "**Breaking changes:**",
+    "- [api] the reply helpers changed (#660).",
+  ].join("\n");
+  const out = collectFragments(
+    `# Changelog\n\n${release}\n`,
+    [{ section: "Bug fixes", bullets: ["- [ops] a post-release fix (#680)."] }],
+    "November 1, 2026",
+    "Collected changes",
+  );
+  assert.equal(
+    out,
+    `# Changelog\n\n### Collected changes — November 1, 2026\n\n**Bug fixes:**\n- [ops] a post-release fix (#680).\n\n${release}\n`,
+  );
+});
+
+test("collectFragments with another title starts its own milestone rather than merging into today's Collected changes", () => {
+  const collected = "### Collected changes — November 1, 2026\n\n**Bug fixes:**\n- [ops] an earlier fix (#680).";
+  const out = collectFragments(
+    `# Changelog\n\n${collected}\n`,
+    [{ section: "Bug fixes", bullets: ["- [ops] a later fix (#681)."] }],
+    "November 1, 2026",
+    "Wave notes",
+  );
+  assert.equal(out, `# Changelog\n\n### Wave notes — November 1, 2026\n\n**Bug fixes:**\n- [ops] a later fix (#681).\n\n${collected}\n`);
+});
+
+test("collectFragments keeps a merged milestone's prose before its first label, verbatim", () => {
+  const today = [
+    "# Changelog",
+    "",
+    "### Collected changes — November 1, 2026",
+    "",
+    "",
+    "A note a person wrote about today's changes.",
+    "It runs to a second line.",
+    "",
+    "**Bug fixes:**",
+    "- [ops] an earlier fix (#680).",
+    "",
+  ].join("\n");
+  const out = collectFragments(
+    today,
+    [
+      { section: "Bug fixes", bullets: ["- [ops] a later fix (#681)."] },
+      { section: "New features", bullets: ["- [user] a feature (#682)."] },
+    ],
+    "November 1, 2026",
+    "Collected changes",
+  );
+  assert.equal(
+    out,
+    [
+      "# Changelog",
+      "",
+      "### Collected changes — November 1, 2026",
+      "",
+      "A note a person wrote about today's changes.",
+      "It runs to a second line.",
+      "",
+      "**New features:**",
+      "- [user] a feature (#682).",
+      "",
+      "**Bug fixes:**",
+      "- [ops] an earlier fix (#680).",
+      "- [ops] a later fix (#681).",
+      "",
+    ].join("\n"),
+  );
 });

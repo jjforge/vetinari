@@ -1395,7 +1395,9 @@ test("a merge-conflict retry resumes the green's session with the conflict promp
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
   const prompt = mergeConflictPrompt(["src/a.ts", "README.md"], "f00dfeed", "main");
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, childRunEntry("prev-sess", prompt), depsFor(sbx)));
+  const outcome = await silence(() =>
+    runLoop(cfg, "T-1", undefined, childRunEntry({ kind: "reenter", prompt, session: "prev-sess" }), depsFor(sbx)),
+  );
 
   assert.equal(outcome, "green");
   assert.equal(fetched, 0, "a resumed retry never re-fetches the task");
@@ -1413,7 +1415,7 @@ test("a merge-conflict retry on a non-resumable provider re-enters fresh on the 
   const sbx = fakeSandbox([{ run: { completionSignal: DONE, commits: [{ sha: "abc123" }] }, green: true }]);
   const prompt = mergeConflictPrompt(["src/a.ts"], "f00dfeed", "main");
 
-  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, childRunEntry(undefined, prompt), depsFor(sbx)));
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, childRunEntry({ kind: "reenter", prompt }), depsFor(sbx)));
 
   assert.equal(outcome, "green");
   assert.equal(sbx.runCalls[0].resumeSession, undefined, "a fresh run, not a session resume");
@@ -1441,8 +1443,8 @@ test("a vetinari-paths retry prompt names the undeclared vetinari/ paths and tel
 });
 
 test("childRunEntry resumes a crashed session with the crash prompt when no conflict prompt is set, and is a fresh run with neither (#624)", () => {
-  assert.deepEqual(childRunEntry("sess-1", undefined), { resumeSessionId: "sess-1", answerPrompt: crashResumePrompt() });
-  assert.equal(childRunEntry(undefined, undefined), undefined);
+  assert.deepEqual(childRunEntry({ kind: "resume", session: "sess-1" }), { resumeSessionId: "sess-1", answerPrompt: crashResumePrompt() });
+  assert.equal(childRunEntry({ kind: "fresh" }), undefined);
 });
 
 test("runLoop consumes an answered parked record for a resumable provider — resumes the session with the answer and clears the record", async () => {

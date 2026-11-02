@@ -13,6 +13,7 @@
 import type { OrchestratorEvent } from "./event-log.ts";
 import type { SlowGates } from "./slow-gates.ts";
 import { PARK_RECOVERY } from "./park-recovery.ts";
+import { isFailedOutcome } from "./child-run.ts";
 
 /** How the terminal renders one issue: `#<id>`, plus the resolved title when the run has one. */
 export function issueLabel(id: string, titles: Record<string, string>): string {
@@ -41,8 +42,8 @@ export function formatWaveStart(index: number, total: number, tasks: string[], t
   return `▶ wave ${index + 1}/${total} — ${issueList(tasks, titles)}`;
 }
 
-/** Map a queue outcome to the terminal word: an `error(n)` is a `failed`, else itself. */
-const outcomeWord = (outcome: string | undefined): string => (outcome?.startsWith("error") ? "failed" : (outcome ?? "?"));
+/** Map a queue outcome to the terminal word: a failure (`error(n)`) is a `failed`, else itself. */
+const outcomeWord = (outcome: string | undefined): string => (isFailedOutcome(outcome) ? "failed" : (outcome ?? "?"));
 
 /** A wave closed: what merged. A wave-done fires only when every member merged (design §2.1),
  * so there is no held or conflict-parked member to annotate — the `merged` list is the wave. */

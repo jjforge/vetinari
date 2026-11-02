@@ -164,8 +164,8 @@ const implScript =
  */
 const localCampaignDeps = (cfg: ResolvedConfig, dir: string, scriptFor: (id: string) => LocalAgentScript = implScript): CampaignDeps => {
   // Enters the loop as the child `run` does: a merge-conflict retry carries its prompt (design §6).
-  const spawnRun: RunSpawner = async (taskId, resumeSession, resumePrompt) => {
-    const outcome = await runLoop(cfg, taskId, undefined, childRunEntry(resumeSession, resumePrompt), loopDepsFor(scriptFor(taskId)));
+  const spawnRun: RunSpawner = async (taskId, start) => {
+    const outcome = await runLoop(cfg, taskId, undefined, childRunEntry(start), loopDepsFor(scriptFor(taskId)));
     return outcome === "green" ? 0 : outcome === "parked" ? 2 : 1;
   };
   // The merged-base gate: real runGates over the merged base through the local sandbox

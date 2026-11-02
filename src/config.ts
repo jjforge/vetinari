@@ -261,14 +261,6 @@ export function resolveAgentSelection(
   return { provider, model, effort, resumable: isResumableProvider(provider) };
 }
 
-/**
- * The env var a `run`/`campaign` invocation stamps its CLI agent override onto, so
- * campaign/queue CHILD `run`s (spawned via `childSpawnEnv`) drive the SAME agent as
- * the parent instead of silently falling back to the config default (ADR 0016).
- * `agentFor` reads it back and merges it over `cfg.agent`.
- */
-export const AGENT_ENV_VAR = "VETINARI_AGENT";
-
 /** Who delivered an answer — the `source` an `answered` event carries. */
 export type AnswerSource = "cli" | "ui" | "telegram";
 

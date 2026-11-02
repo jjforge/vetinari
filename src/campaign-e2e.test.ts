@@ -128,13 +128,13 @@ const localCampaignDeps = (
   scriptFor: (id: string) => LocalAgentScript,
   spawns: string[] = [],
 ): CampaignDeps => {
-  const spawnRun: RunSpawner = async (taskId, resumeSession, resumePrompt) => {
+  const spawnRun: RunSpawner = async (taskId, start) => {
     spawns.push(taskId);
     // Enter the loop exactly as the child `run` does (cli-dispatch): a crash redrive resumes the
     // crashed session with the continue-where-you-left-off prompt (design §7); a merge-conflict
     // retry resumes with its conflict prompt, or re-enters fresh with it on a non-resumable
     // provider (design §6). Every other spawn gets neither.
-    const entry = childRunEntry(resumeSession, resumePrompt);
+    const entry = childRunEntry(start);
     try {
       const outcome = await runLoop(cfg, taskId, undefined, entry, loopDepsFor(scriptFor(taskId)));
       // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
@@ -1269,8 +1269,8 @@ test('scenario 17: a --now stop during a merge-conflict retry parks the retrying
           return base.integrate(...args);
         },
         // The first pass runs for real; the retry's child is killed by the stop as it starts.
-        spawnRun: async (id, resume, prompt) => {
-          if (prompt === undefined) return base.spawnRun(id, resume, prompt);
+        spawnRun: async (id, start) => {
+          if (start.kind !== "reenter") return base.spawnRun(id, start);
           retried.push(id);
           fire("SIGTERM");
           return "SIGTERM";

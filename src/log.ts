@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { gatewayConfigDir } from "./registry.ts";
 import { readEventLog, type BaseEvent, type OrchestratorEvent } from "./event-log.ts";
 import type { ResolvedConfig } from "./config.ts";
+import { isJsonOutput } from "./child-run.ts";
 
 /** The narrowed kinds the dashboard reads back (`event-log.ts`); their emit sites are typed. */
 type NarrowedKind = OrchestratorEvent["event"];
@@ -28,13 +29,13 @@ const stampRow = (event: string, data: Record<string, unknown>) => ({ ts: new Da
 
 /** An adapter that appends stamped JSONL to `path` — the shared backend of `loggerForRun` and
  * `hostLogger`. The screen is human-readable by default (design §11): events go to the file, and
- * to stdout ONLY under `--json` (the `VETINARI_JSON` env the CLI sets and child spawns inherit),
+ * to stdout ONLY under `--json` (`isJsonOutput` — the CLI sets it and child spawns inherit it),
  * where the raw JSONL line is streamed verbatim for tooling. Without it no JSON reaches stdout —
  * the terminal view is the `report.ts` lines alone (#299). */
 function fileLogger(path: string): Logger {
   const write = (event: string, data: Record<string, unknown> = {}): void => {
     const line = JSON.stringify(stampRow(event, data));
-    if (process.env.VETINARI_JSON === "1") console.log(line);
+    if (isJsonOutput()) console.log(line);
     try {
       appendFileSync(path, line + "\n");
     } catch {

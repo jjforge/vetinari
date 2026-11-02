@@ -42,6 +42,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     exit: spy() as unknown as DispatchDeps["exit"],
     selectAgent: spy(),
     isCampaignChild: false,
+    childStart: { kind: "fresh" },
     archiveLeftoverRun: spy(),
     archiveIfIdle: spy(),
     askUnderspecified: spy("drop") as unknown as DispatchDeps["askUnderspecified"],
@@ -557,13 +558,13 @@ test("dispatch run selects the agent, archives the leftover, runs the loop, maps
   assert.deepEqual((deps.selectAgent as any).calls, [[deps.cfg, { provider: "codex" }]]);
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 1);
   // The loop is handed the host budget so it holds one slot around the container (design §8), and
-  // no resume entry for a fresh run (no VETINARI_RESUME_SESSION → undefined).
+  // no resume entry for a fresh run (a fresh start → undefined).
   assert.deepEqual((deps.runLoop as any).calls, [[deps.cfg, "436", deps.host, undefined]]);
   assert.deepEqual(exitCodes, [0]);
 });
 
 test("dispatch run resumes a crashed session when spawned with one (design §7): the loop gets a resume entry", async () => {
-  const { deps } = makeDeps({ resumeSession: "sess-436" });
+  const { deps } = makeDeps({ childStart: { kind: "resume", session: "sess-436" } });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   const call = (deps.runLoop as any).calls[0];
   assert.deepEqual(call.slice(0, 3), [deps.cfg, "436", deps.host]);
@@ -572,14 +573,14 @@ test("dispatch run resumes a crashed session when spawned with one (design §7):
 });
 
 test("dispatch run resumes the session with the campaign's conflict prompt in place of the crash prompt when spawned with one (#624)", async () => {
-  const { deps } = makeDeps({ resumeSession: "sess-436", resumePrompt: "merge the base, resolve src/a.ts" });
+  const { deps } = makeDeps({ childStart: { kind: "reenter", prompt: "merge the base, resolve src/a.ts", session: "sess-436" } });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   const call = (deps.runLoop as any).calls[0];
   assert.deepEqual(call[3], { resumeSessionId: "sess-436", answerPrompt: "merge the base, resolve src/a.ts" });
 });
 
 test("dispatch run re-enters fresh with the conflict prompt on the issue text when spawned with a prompt and no session (#624)", async () => {
-  const { deps } = makeDeps({ resumePrompt: "merge the base, resolve src/a.ts" });
+  const { deps } = makeDeps({ childStart: { kind: "reenter", prompt: "merge the base, resolve src/a.ts" } });
   await dispatch({ kind: "run", agent: {}, args: ["436"], json: false }, deps);
   const call = (deps.runLoop as any).calls[0];
   assert.equal(call[3].resumeSessionId, undefined, "no session to resume — a fresh run");

@@ -32,6 +32,7 @@ import {
   type RunSpawner,
 } from "./modes.ts";
 import { integrateGreens, VETINARI_PATHS_GATE } from "./merge.ts";
+import type { ChildStart } from "./child-run.ts";
 import { packageScopedFileSet, type FileSetOf } from "./fileset.ts";
 import { loggerForRun, memoryLogger, type MemoryLogger } from "./log.ts";
 import { answerParked, clearParked, hasParked, isAnswered, listOutbox, listParked, readParked, writeParkedRecord } from "./state.ts";
@@ -967,8 +968,8 @@ test("a campaign that fails or parks prints its merged-base gate total beside th
     const cfg = harnessCfg(dir);
     const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
     // Wave 1 merges and gates its base; wave 2's member fails or parks.
-    const spawnRun: CampaignDeps["spawnRun"] = async (taskId) => {
-      if (taskId === "101") return greenAfterGate(cfg)(taskId);
+    const spawnRun: CampaignDeps["spawnRun"] = async (taskId, start) => {
+      if (taskId === "101") return greenAfterGate(cfg)(taskId, start);
       if (exit === 2) seedParkedRecord(cfg, taskId);
       return exit;
     };
@@ -1255,7 +1256,7 @@ const recordingDeps = (
     regates = [],
   }: { spawnRun?: CampaignDeps["spawnRun"]; regates?: (boolean | undefined)[] } = {},
 ): CampaignDeps => ({
-  spawnRun: async (id) => spawnRun(id),
+  spawnRun: async (id, start) => spawnRun(id, start),
   integrate: async (_cfg, greens, _deps, _index, opts) => {
     integrated.push(greens);
     regates.push(opts?.regate);
@@ -1629,8 +1630,8 @@ const resumeCapturingDeps = (
   regates: (boolean | undefined)[],
   branchHasCommits: (cfg: ResolvedConfig, id: string) => boolean,
 ): CampaignDeps => ({
-  spawnRun: async (id, resume) => {
-    spawns.push({ id, resume });
+  spawnRun: async (id, start) => {
+    spawns.push({ id, resume: start.kind === "fresh" ? undefined : start.session });
     return 0;
   },
   integrate: async (_cfg, greens, _deps, _index, opts) => {
@@ -2463,9 +2464,9 @@ const queueReadmitRecordingSpawns = async (
   const cfg = harnessCfg(dir);
   const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   let release101!: (code: number) => void;
-  const spawns: Array<[string, string | undefined, string | undefined]> = [];
-  const spawnRun: RunSpawner = (taskId, resumeSession, resumePrompt) => {
-    spawns.push([taskId, resumeSession, resumePrompt]);
+  const spawns: Array<[string, ChildStart]> = [];
+  const spawnRun: RunSpawner = (taskId, start) => {
+    spawns.push([taskId, start]);
     if (taskId === "101") return new Promise<number>((r) => (release101 = r));
     if (spawns.filter(([s]) => s === "102").length === 1) {
       seedParkedRecord(cfg, "102");
@@ -2492,8 +2493,8 @@ test("an answered park re-admitted mid-drain spawns without the crash session it
   const { outcomes, spawns } = await queueReadmitRecordingSpawns(t, { "102": "crash-sess" }, {});
 
   assert.deepEqual(spawns, [
-    ["102", "crash-sess", undefined],
-    ["102", undefined, undefined],
+    ["102", { kind: "resume", session: "crash-sess" }],
+    ["102", { kind: "fresh" }],
   ]);
   assert.deepEqual(outcomes, { "101": "green", "102": "green" });
 });
@@ -2502,8 +2503,8 @@ test("an answered park re-admitted mid-drain spawns without the conflict prompt 
   const { outcomes, spawns } = await queueReadmitRecordingSpawns(t, {}, { "102": "conflict prompt" });
 
   assert.deepEqual(spawns, [
-    ["102", undefined, "conflict prompt"],
-    ["102", undefined, undefined],
+    ["102", { kind: "reenter", prompt: "conflict prompt" }],
+    ["102", { kind: "fresh" }],
   ]);
   assert.deepEqual(outcomes, { "101": "green", "102": "green" });
 });
@@ -2932,9 +2933,9 @@ test("a --now stop that kills a child after it logged failed still ends the camp
   const cfg = harnessCfg(dir);
   const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
   const kids = killedChildren();
-  const spawnRun: RunSpawner = (id) => {
+  const spawnRun: RunSpawner = (id, start) => {
     cfg.log.log("failed", { taskId: id, detail: "agent error" });
-    return kids.spawnRun(id);
+    return kids.spawnRun(id, start);
   };
   const stop = stopDeps(gitFreeDeps(cfg, spawnRun), () => setImmediate(kids.releaseAll));
   const running = silenceConsole(() => campaign(cfg, [["101"]], host, undefined, {}, stop.deps));
@@ -3050,7 +3051,7 @@ test("graceWaitForAnswer resolves as soon as the campaign is stopping, without w
 });
 
 test("childSpawnOptions puts a child run in its own process group and carries VETINARI_CHILD (#403)", () => {
-  const opts = childSpawnOptions({ PATH: "/bin" }, { VETINARI_RESUME_SESSION: "s1" });
+  const opts = childSpawnOptions({ PATH: "/bin" }, { kind: "resume", session: "s1" });
   assert.equal(opts.detached, true);
   assert.equal(opts.env?.VETINARI_CHILD, "1");
   assert.equal(opts.env?.PATH, "/bin");
@@ -3399,7 +3400,8 @@ async function vetinariPathsCampaign(dir: string, issue: { body: string }, onRet
   };
   const spawns: { taskId: string; prompt?: string }[] = [];
   const deps: CampaignDeps = {
-    ...gitFreeDeps(cfg, async (taskId, _session, prompt) => {
+    ...gitFreeDeps(cfg, async (taskId, start) => {
+      const prompt = start.kind === "reenter" ? start.prompt : undefined;
       spawns.push({ taskId, prompt });
       if (prompt) onRetry();
       return 0;

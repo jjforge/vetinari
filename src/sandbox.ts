@@ -15,14 +15,8 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, posix, resolve, sep } from "node:path";
-import {
-  AGENT_ENV_VAR,
-  parseAgentOverride,
-  resolveAgentSelection,
-  type AgentSelection,
-  type MountSpec,
-  type ResolvedConfig,
-} from "./config.ts";
+import { resolveAgentSelection, type AgentSelection, type MountSpec, type ResolvedConfig } from "./config.ts";
+import { readAgentOverride } from "./child-run.ts";
 
 /**
  * The token-usage snapshot the loop folds per iteration (a subset of sandcastle's
@@ -301,8 +295,7 @@ export function foreignWorktreeFor(branch: string, stateDir: string, cwd: string
  * off this to decide whether to resume a session between turns or re-enter each turn fresh
  * (#212); `agentFor` reads it to build the provider.
  */
-export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection =>
-  resolveAgentSelection(cfg.agent, parseAgentOverride(process.env[AGENT_ENV_VAR]));
+export const agentSelectionFor = (cfg: ResolvedConfig): AgentSelection => resolveAgentSelection(cfg.agent, readAgentOverride());
 
 /**
  * A sandcastle `AgentProvider` that may also know the session id of the turn it last built —

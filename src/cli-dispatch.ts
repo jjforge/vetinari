@@ -24,6 +24,7 @@ import type { build, baseline, campaign, tgTest, requireTelegram, readImageFresh
 import type { runTgConnect } from "./tg-connect.ts";
 import type { tgSend } from "./telegram.ts";
 import { childRunEntry, type runLoop, type Outcome } from "./loop.ts";
+import { enableJsonOutput, type ChildStart } from "./child-run.ts";
 import {
   isPathEscapingTaskId,
   type answerParked,
@@ -68,13 +69,13 @@ export const identityLine = (project: string, repo: string | undefined, id: stri
 };
 
 /**
- * Turn on `--json` for the raw-event stream: set the `VETINARI_JSON` env the run logger keys its
- * stdout echo on (`log.ts`) — and which child wave `run`s inherit — so `campaign`/`run`/`redrive`
+ * Turn on `--json` for the raw-event stream (`enableJsonOutput`): the run logger keys its stdout
+ * echo on it (`log.ts`) — and child wave `run`s inherit it — so `campaign`/`run`/`redrive`
  * stream JSONL to stdout for tooling. Left unset, no JSON reaches stdout: the terminal view is the
  * `report.ts` human lines alone (design §11, #299).
  */
 const enableJson = (on: boolean): void => {
-  if (on) process.env.VETINARI_JSON = "1";
+  if (on) enableJsonOutput();
 };
 
 /** A partial `--agent`/`--model`/`--effort` override, as `parseAgentFlags` yields it. */
@@ -359,18 +360,11 @@ export interface DispatchDeps {
    */
   isCampaignChild: boolean;
   /**
-   * The crashed session id a campaign redrive spawned this child to resume (design §7,
-   * `VETINARI_RESUME_SESSION`): when set, a `run` re-enters the loop on that session on the
-   * existing branch instead of a fresh start. Undefined for a fresh run or an answered re-admit.
+   * How a campaign spawned this child `run` to start (`decodeChildStart`, design §6, §7): resume a
+   * crashed session on the existing branch, re-enter with a merge-conflict retry's prompt, or —
+   * for a fresh run, an answered re-admit, or a `run` no campaign spawned — `fresh`.
    */
-  resumeSession?: string;
-  /**
-   * The prompt a campaign spawned this child to run with (design §6, `VETINARI_RESUME_PROMPT`): a
-   * merge-conflict retry's conflict prompt. With `resumeSession` it resumes that session in place of
-   * the crash prompt; without one (a non-resumable provider) it re-enters fresh on the kept branch
-   * with the prompt added to the issue text. Undefined for every other spawn.
-   */
-  resumePrompt?: string;
+  childStart: ChildStart;
   /** Archive a prior run still sitting in the live log before a fresh run appends. */
   archiveLeftoverRun: () => void;
   /** Reset live state once a run is truly over (skipped while anything is parked). */
@@ -546,11 +540,10 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
       }
       deps.archiveLeftoverRun();
       // A crash redrive spawned this child to resume a crashed session on the existing branch
-      // (design §7, `VETINARI_RESUME_SESSION`): re-enter the loop on that session with a
-      // continue-where-you-left-off prompt rather than a fresh fetch. A merge-conflict retry
-      // (design §6, `VETINARI_RESUME_PROMPT`) carries its own prompt in place of that one, or
-      // re-enters fresh with it when there is no session. Neither → a fresh run.
-      const resumeEntry = childRunEntry(deps.resumeSession, deps.resumePrompt);
+      // (design §7): re-enter the loop on that session with a continue-where-you-left-off prompt
+      // rather than a fresh fetch. A merge-conflict retry (design §6) carries its own prompt in
+      // place of that one, or re-enters fresh with it when there is no session. Else a fresh run.
+      const resumeEntry = childRunEntry(deps.childStart);
       // Exit code is the queue's slot signal (design §3): 0 green, 2 parked, 1 failed. The loop
       // holds one host slot around the container (design §3 step 1, §8) — `deps.host` carries the
       // budget; a campaign child skips the slot itself (its parent holds one for it).

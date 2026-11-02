@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { githubFetchTask } from "./index.ts";
 import {
   AGENT_PROVIDERS,
+  applyHostEnv,
   assertProjectQualifier,
   containerShareWeight,
   encodeAgentOverride,
@@ -26,10 +27,12 @@ import {
   repoForProject,
   resolveAgentSelection,
   isResumableProvider,
+  resolveConfig,
   resolveConfigPath,
   resolveDestination,
   resolveProjectRoot,
   type Destination,
+  type VetinariConfig,
 } from "./config.ts";
 import { withEnv } from "./test-support.ts";
 
@@ -48,6 +51,17 @@ const writeConfig = (baseDir: string, rel: string, body = CONFIG_BODY) => {
   writeFileSync(full, body);
   return full;
 };
+
+// The raw config `resolveConfig` takes — what a config file's default export would be.
+const RAW: VetinariConfig = {
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+};
+// Stands in for the config file's path in refusal messages.
+const CFG_PATH = "vetinari/config.mts";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "vetinari-config-"));
 
@@ -85,10 +99,8 @@ test("resolveConfigPath returns undefined when no candidate exists", () => {
   assert.equal(resolveConfigPath(scratch()), undefined);
 });
 
-test("loadConfig defaults state under .vetinari.local, with parkedDir and logFile following", async () => {
-  const cfgPath = writeConfig(scratch(), "vetinari/config.mts");
-
-  const cfg = await loadConfig(cfgPath);
+test("resolveConfig defaults state under .vetinari.local, with parkedDir and logFile following", () => {
+  const cfg = resolveConfig(RAW, CFG_PATH);
 
   assert.equal(cfg.stateDir, ".vetinari.local");
   assert.equal(cfg.parkedDir, ".vetinari.local/parked");
@@ -149,20 +161,11 @@ test("containerShareWeight maps the three tiers to internal fair-share weights (
   assert.equal(containerShareWeight("low"), 1);
 });
 
-test("loadConfig defaults containerShare to medium, and honors an explicit tier", async () => {
-  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+test("resolveConfig defaults containerShare to medium, and honors an explicit tier", () => {
+  const dflt = resolveConfig(RAW, CFG_PATH);
   assert.equal(dflt.containerShare, "medium");
 
-  const shared = `export default {
-  project: "demo",
-  image: "img",
-  baseBranch: "main",
-  gates: [{ cmd: "true" }],
-  fetchTask: (id) => id,
-  containerShare: "high",
-};
-`;
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", shared));
+  const cfg = resolveConfig({ ...RAW, containerShare: "high" }, CFG_PATH);
   assert.equal(cfg.containerShare, "high");
 });
 
@@ -190,20 +193,27 @@ test("loadConfig lets hostEnv override GIT_TERMINAL_PROMPT", async () => {
   });
 });
 
-test("loadConfig defaults parkGraceSeconds to 0, and honors an explicit window", async () => {
-  const dflt = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+test("resolveConfig leaves process.env untouched, even with hostEnv set", () => {
+  const before = { ...process.env };
+  resolveConfig({ ...RAW, hostEnv: { VETINARI_RESOLVE_PROBE: "1", GIT_TERMINAL_PROMPT: "1" } }, CFG_PATH);
+  assert.deepEqual({ ...process.env }, before);
+});
+
+test("applyHostEnv sets GIT_TERMINAL_PROMPT=0, then each hostEnv key, which may override it", () => {
+  withEnv({ GIT_TERMINAL_PROMPT: undefined, VETINARI_APPLY_PROBE: undefined }, () => {
+    applyHostEnv(resolveConfig(RAW, CFG_PATH));
+    assert.equal(process.env.GIT_TERMINAL_PROMPT, "0");
+    applyHostEnv(resolveConfig({ ...RAW, hostEnv: { VETINARI_APPLY_PROBE: "x", GIT_TERMINAL_PROMPT: "1" } }, CFG_PATH));
+    assert.equal(process.env.VETINARI_APPLY_PROBE, "x");
+    assert.equal(process.env.GIT_TERMINAL_PROMPT, "1");
+  });
+});
+
+test("resolveConfig defaults parkGraceSeconds to 0, and honors an explicit window", () => {
+  const dflt = resolveConfig(RAW, CFG_PATH);
   assert.equal(dflt.parkGraceSeconds, 0);
 
-  const withGrace = `export default {
-  project: "demo",
-  image: "img",
-  baseBranch: "main",
-  gates: [{ cmd: "true" }],
-  fetchTask: (id) => id,
-  parkGraceSeconds: 45,
-};
-`;
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGrace));
+  const cfg = resolveConfig({ ...RAW, parkGraceSeconds: 45 }, CFG_PATH);
   assert.equal(cfg.parkGraceSeconds, 45);
 });
 
@@ -295,34 +305,27 @@ test("resolveDestination returns undefined for an unmapped category with no wild
   assert.equal(resolveDestination(notify, "progress", "prune"), undefined);
 });
 
-const withNotify = (notify: string) => CONFIG_BODY.replace("fetchTask:", `notify: ${notify},\n  fetchTask:`);
-
-test("loadConfig rejects a notify map that fans the interactive question category out to two destinations", async () => {
-  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withNotify(`{ question: "alerts", "question:urgent": "ops" }`));
-
-  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
-    assert.match(err.message, /question/);
-    assert.match(err.message, /alerts/);
-    assert.match(err.message, /ops/);
-    return true;
-  });
-});
-
-test("loadConfig rejects question fan-out that comes via the wildcard catching unlisted question events", async () => {
-  // `question:urgent` -> ops, but every other question event falls to `*` -> alerts.
-  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withNotify(`{ "question:urgent": "ops", "*": "alerts" }`));
-
-  await assert.rejects(loadConfig(cfgPath), /question/);
-});
-
-test("loadConfig accepts a notify map where question resolves to one destination while broadcasts fan freely", async () => {
-  const cfgPath = writeConfig(
-    scratch(),
-    "vetinari/config.mts",
-    withNotify(`{ "*": "ops", question: "alerts", "question:urgent": "alerts", failure: "pager", "progress:prune": "chatter" }`),
+test("resolveConfig rejects a notify map that fans the interactive question category out to two destinations", () => {
+  assert.throws(
+    () => resolveConfig({ ...RAW, notify: { question: "alerts", "question:urgent": "ops" } }, CFG_PATH),
+    (err: Error) => {
+      assert.match(err.message, /question/);
+      assert.match(err.message, /alerts/);
+      assert.match(err.message, /ops/);
+      return true;
+    },
   );
+});
 
-  const cfg = await loadConfig(cfgPath);
+test("resolveConfig rejects question fan-out that comes via the wildcard catching unlisted question events", () => {
+  // `question:urgent` -> ops, but every other question event falls to `*` -> alerts.
+  assert.throws(() => resolveConfig({ ...RAW, notify: { "question:urgent": "ops", "*": "alerts" } }, CFG_PATH), /question/);
+});
+
+test("resolveConfig accepts a notify map where question resolves to one destination while broadcasts fan freely", () => {
+  const notify = { "*": "ops", question: "alerts", "question:urgent": "alerts", failure: "pager", "progress:prune": "chatter" };
+
+  const cfg = resolveConfig({ ...RAW, notify }, CFG_PATH);
 
   assert.equal(cfg.notify?.question, "alerts");
 });
@@ -652,14 +655,8 @@ test("VETINARI_SECRET_KEYS is exactly the bot connection", () => {
   assert.deepEqual(VETINARI_SECRET_KEYS, ["VETINARI_TELEGRAM_BOT_TOKEN", "VETINARI_TELEGRAM_CHAT_ID"]);
 });
 
-test("loadConfig honors an explicit stateDir over the flipped default", async () => {
-  const cfgPath = writeConfig(
-    scratch(),
-    "vetinari/config.mts",
-    CONFIG_BODY.replace("fetchTask:", 'stateDir: "custom-state",\n  fetchTask:'),
-  );
-
-  const cfg = await loadConfig(cfgPath);
+test("resolveConfig honors an explicit stateDir over the flipped default", () => {
+  const cfg = resolveConfig({ ...RAW, stateDir: "custom-state" }, CFG_PATH);
 
   assert.equal(cfg.stateDir, "custom-state");
   assert.equal(cfg.parkedDir, "custom-state/parked");
@@ -921,114 +918,119 @@ for (const template of ["../templates/config.mts", "../templates/config.github.m
   });
 }
 
-test("loadConfig refuses a waivedFiles that is not a string[], and accepts any string[] — even a directory", async () => {
-  const withWaived = (value: string) => CONFIG_BODY.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  waivedFiles: ${value},`);
-  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`"DESIGN.md"`))), (err: unknown) => {
-    assert.ok(err instanceof Refusal);
-    assert.match(err.message, /"waivedFiles" must be an array of repo-relative paths/);
-    return true;
-  });
-  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`["DESIGN.md", 3]`))), Refusal);
+test("resolveConfig refuses a waivedFiles that is not a string[], and accepts any string[] — even a directory", () => {
+  const withWaived = (waivedFiles: unknown) => ({ ...RAW, waivedFiles }) as unknown as VetinariConfig;
+  assert.throws(
+    () => resolveConfig(withWaived("DESIGN.md"), CFG_PATH),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      assert.match(err.message, /"waivedFiles" must be an array of repo-relative paths/);
+      return true;
+    },
+  );
+  assert.throws(() => resolveConfig(withWaived(["DESIGN.md", 3]), CFG_PATH), Refusal);
   // Shape only: config load has no tree to check against, so a directory entry loads.
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withWaived(`["DESIGN.md", "src"]`)));
+  const cfg = resolveConfig(withWaived(["DESIGN.md", "src"]), CFG_PATH);
   assert.deepEqual(cfg.waivedFiles, ["DESIGN.md", "src"]);
 });
 
-test("loadConfig needs an image only for the Docker default: a sandbox factory loads without one", async () => {
-  const noImage = CONFIG_BODY.replace(`  image: "img",\n`, "");
-  const withSandbox = noImage.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  sandbox: () => ({ name: "fake", env: {} }),`);
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withSandbox));
+test("resolveConfig needs an image only for the Docker default: a sandbox factory loads without one", () => {
+  const noImage: VetinariConfig = { ...RAW };
+  delete noImage.image;
+  const withSandbox = { ...noImage, sandbox: () => ({ name: "fake", env: {} }) } as unknown as VetinariConfig;
+  const cfg = resolveConfig(withSandbox, CFG_PATH);
   assert.equal(cfg.image, undefined);
   assert.equal(typeof cfg.sandbox, "function");
-  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", noImage)), (err: unknown) => {
-    assert.ok(err instanceof Refusal);
-    assert.match(err.message, /missing required field "image"/);
-    return true;
-  });
-});
-
-test("loadConfig refuses a ./-prefixed waivedFiles entry, naming it and suggesting the file key (#627)", async () => {
-  const body = CONFIG_BODY.replace("fetchTask: (id) => id,", `fetchTask: (id) => id,\n  waivedFiles: ["README.md", "./docs/x.md"],`);
-  await assert.rejects(loadConfig(writeConfig(scratch(), "vetinari/config.mts", body)), (err: unknown) => {
-    assert.ok(err instanceof Refusal);
-    assert.match(err.message, /"waivedFiles" entry \.\/docs\/x\.md: entries are file keys, write docs\/x\.md/);
-    return true;
-  });
-});
-
-test("loadConfig refuses a non-boolean perMerge on a gate, naming the gate, and accepts a boolean (#617)", async () => {
-  const withGates = (gates: string) => CONFIG_BODY.replace(`gates: [{ cmd: "true" }],`, `gates: ${gates},`);
-  const cfgPath = writeConfig(
-    scratch(),
-    "vetinari/config.mts",
-    withGates(`[{ cmd: "true" }, { cmd: "make lint", label: "lint", perMerge: "yes" }]`),
+  assert.throws(
+    () => resolveConfig(noImage, CFG_PATH),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      assert.match(err.message, /missing required field "image"/);
+      return true;
+    },
   );
-  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
-    assert.ok(err instanceof Refusal);
-    assert.equal(err.message, `${cfgPath}: gate "lint": "perMerge" must be true or false, got "yes"`);
-    return true;
-  });
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGates(`[{ cmd: "make lint", perMerge: true }]`)));
+});
+
+test("resolveConfig refuses a ./-prefixed waivedFiles entry, naming it and suggesting the file key (#627)", () => {
+  assert.throws(
+    () => resolveConfig({ ...RAW, waivedFiles: ["README.md", "./docs/x.md"] }, CFG_PATH),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      assert.match(err.message, /"waivedFiles" entry \.\/docs\/x\.md: entries are file keys, write docs\/x\.md/);
+      return true;
+    },
+  );
+});
+
+test("resolveConfig refuses a non-boolean perMerge on a gate, naming the gate, and accepts a boolean (#617)", () => {
+  const withGates = (gates: unknown) => ({ ...RAW, gates }) as unknown as VetinariConfig;
+  assert.throws(
+    () => resolveConfig(withGates([{ cmd: "true" }, { cmd: "make lint", label: "lint", perMerge: "yes" }]), CFG_PATH),
+    (err: Error) => {
+      assert.ok(err instanceof Refusal);
+      assert.equal(err.message, `${CFG_PATH}: gate "lint": "perMerge" must be true or false, got "yes"`);
+      return true;
+    },
+  );
+  const cfg = resolveConfig(withGates([{ cmd: "make lint", perMerge: true }]), CFG_PATH);
   assert.equal(cfg.gates[0].perMerge, true);
 });
 
-test("loadConfig refuses a timeoutSeconds that is not a positive whole number, naming the gate, and accepts one (#531)", async () => {
-  const withGates = (gates: string) => CONFIG_BODY.replace(`gates: [{ cmd: "true" }],`, `gates: ${gates},`);
+test("resolveConfig refuses a timeoutSeconds that is not a positive whole number, naming the gate, and accepts one (#531)", () => {
+  const withGates = (gates: unknown) => ({ ...RAW, gates }) as unknown as VetinariConfig;
   for (const [bad, shown] of [
-    ["0", "0"],
-    ["-5", "-5"],
-    ["1.5", "1.5"],
-    [`"60"`, `"60"`],
+    [0, "0"],
+    [-5, "-5"],
+    [1.5, "1.5"],
+    ["60", `"60"`],
   ]) {
-    const cfgPath = writeConfig(
-      scratch(),
-      "vetinari/config.mts",
-      withGates(`[{ cmd: "true" }, { cmd: "make test", label: "test", timeoutSeconds: ${bad} }]`),
+    assert.throws(
+      () => resolveConfig(withGates([{ cmd: "true" }, { cmd: "make test", label: "test", timeoutSeconds: bad }]), CFG_PATH),
+      (err: Error) => {
+        assert.ok(err instanceof Refusal);
+        assert.equal(err.message, `${CFG_PATH}: gate "test": "timeoutSeconds" must be a positive whole number of seconds, got ${shown}`);
+        return true;
+      },
     );
-    await assert.rejects(loadConfig(cfgPath), (err: Error) => {
-      assert.ok(err instanceof Refusal);
-      assert.equal(err.message, `${cfgPath}: gate "test": "timeoutSeconds" must be a positive whole number of seconds, got ${shown}`);
-      return true;
-    });
   }
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withGates(`[{ cmd: "make test", timeoutSeconds: 60 }]`)));
+  const cfg = resolveConfig(withGates([{ cmd: "make test", timeoutSeconds: 60 }]), CFG_PATH);
   assert.equal(cfg.gates[0].timeoutSeconds, 60);
 });
 
-const withContainerShare = (share: string) => CONFIG_BODY.replace("fetchTask:", `containerShare: ${share},\n  fetchTask:`);
-
-test("loadConfig refuses an unknown containerShare tier, naming the field and the value", async () => {
-  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withContainerShare(`"hgih"`));
-  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
-    assert.ok(err instanceof Refusal);
-    assert.ok(err.message.endsWith(`"containerShare" must be "high", "medium" or "low", got "hgih"`), err.message);
-    return true;
-  });
-  const numPath = writeConfig(scratch(), "vetinari/config.mts", withContainerShare("3"));
-  await assert.rejects(
-    loadConfig(numPath),
-    (err: Error) => err.message === `${numPath}: "containerShare" must be "high", "medium" or "low", got 3`,
+test("resolveConfig refuses an unknown containerShare tier, naming the field and the value", () => {
+  const withContainerShare = (containerShare: unknown) => ({ ...RAW, containerShare }) as unknown as VetinariConfig;
+  assert.throws(
+    () => resolveConfig(withContainerShare("hgih"), CFG_PATH),
+    (err: Error) => {
+      assert.ok(err instanceof Refusal);
+      assert.ok(err.message.endsWith(`"containerShare" must be "high", "medium" or "low", got "hgih"`), err.message);
+      return true;
+    },
+  );
+  assert.throws(
+    () => resolveConfig(withContainerShare(3), CFG_PATH),
+    (err: Error) => err.message === `${CFG_PATH}: "containerShare" must be "high", "medium" or "low", got 3`,
   );
 });
 
-test("loadConfig accepts each containerShare tier, and defaults an absent one to medium", async () => {
-  for (const share of ["high", "medium", "low"]) {
-    const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withContainerShare(`"${share}"`)));
+test("resolveConfig accepts each containerShare tier, and defaults an absent one to medium", () => {
+  for (const share of ["high", "medium", "low"] as const) {
+    const cfg = resolveConfig({ ...RAW, containerShare: share }, CFG_PATH);
     assert.equal(cfg.containerShare, share);
   }
-  const cfg = await loadConfig(writeConfig(scratch(), "vetinari/config.mts"));
+  const cfg = resolveConfig(RAW, CFG_PATH);
   assert.equal(cfg.containerShare, "medium");
 });
 
-const withFileOverlap = (mode: string) => CONFIG_BODY.replace("fetchTask:", `fileOverlap: ${mode},\n  fetchTask:`);
-
-test("loadConfig resolves an absent fileOverlap to strict, accepts allow, and refuses any other mode (#623)", async () => {
-  assert.equal((await loadConfig(writeConfig(scratch(), "vetinari/config.mts"))).fileOverlap, "strict");
-  assert.equal((await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withFileOverlap(`"allow"`)))).fileOverlap, "allow");
-  const cfgPath = writeConfig(scratch(), "vetinari/config.mts", withFileOverlap(`"loose"`));
-  await assert.rejects(loadConfig(cfgPath), (err: Error) => {
-    assert.ok(err instanceof Refusal);
-    assert.equal(err.message, `${cfgPath}: "fileOverlap" must be "strict" or "allow", got "loose"`);
-    return true;
-  });
+test("resolveConfig resolves an absent fileOverlap to strict, accepts allow, and refuses any other mode (#623)", () => {
+  assert.equal(resolveConfig(RAW, CFG_PATH).fileOverlap, "strict");
+  assert.equal(resolveConfig({ ...RAW, fileOverlap: "allow" }, CFG_PATH).fileOverlap, "allow");
+  assert.throws(
+    () => resolveConfig({ ...RAW, fileOverlap: "loose" } as unknown as VetinariConfig, CFG_PATH),
+    (err: Error) => {
+      assert.ok(err instanceof Refusal);
+      assert.equal(err.message, `${CFG_PATH}: "fileOverlap" must be "strict" or "allow", got "loose"`);
+      return true;
+    },
+  );
 });

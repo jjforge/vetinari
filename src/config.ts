@@ -894,6 +894,16 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   const mod = await import(resolve(path));
   const c: VetinariConfig = mod.default ?? mod.config;
   if (!c) throw new Refusal(`${path} has no default export`);
+  const cfg = resolveConfig(c, path);
+  applyHostEnv(cfg);
+  return cfg;
+}
+
+/**
+ * Turn a config file's default export into a `ResolvedConfig`: every shape check and every
+ * default, with no filesystem and no `process.env`. Throws a `Refusal` naming `path` on a bad field.
+ */
+export function resolveConfig(c: VetinariConfig, path: string): ResolvedConfig {
   // `image` is only the Docker default's: a configured `sandbox` provider needs none.
   for (const required of ["project", "image", "baseBranch", "gates", "fetchTask"] as const) {
     if (required === "image" && c.sandbox) continue;
@@ -934,12 +944,6 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
   }
 
   const stateDir = c.stateDir ?? ".vetinari.local";
-  // hostEnv is applied to THIS process only; it is never handed to a sandbox.
-  // Host-side git (sandcastle's pre-worktree fetch) inherits this env: fail fast on a
-  // missing credential rather than prompt past the worktree timeout. hostEnv may override.
-  process.env.GIT_TERMINAL_PROMPT = "0";
-  for (const [k, v] of Object.entries(c.hostEnv ?? {})) process.env[k] = v;
-
   const logFile = `${stateDir}/logs/orchestrator.jsonl`;
   return {
     branchPrefix: "agent/",
@@ -955,4 +959,14 @@ export async function loadConfig(explicitPath?: string): Promise<ResolvedConfig>
     logFile,
     log: loggerForRun({ logFile }),
   } as ResolvedConfig;
+}
+
+/**
+ * hostEnv is applied to THIS process only; it is never handed to a sandbox.
+ * Host-side git (sandcastle's pre-worktree fetch) inherits this env: fail fast on a
+ * missing credential rather than prompt past the worktree timeout. hostEnv may override.
+ */
+export function applyHostEnv(cfg: Pick<ResolvedConfig, "hostEnv">): void {
+  process.env.GIT_TERMINAL_PROMPT = "0";
+  for (const [k, v] of Object.entries(cfg.hostEnv ?? {})) process.env[k] = v;
 }

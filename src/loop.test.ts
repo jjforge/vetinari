@@ -1578,12 +1578,12 @@ test("a campaign child run takes no host slot — its parent already holds one f
   assert.deepEqual(readLeases(configDir), [], "no lease is left behind");
 });
 
-// --- The per-run stop handler (SIGINT/SIGTERM → park `stopped`, exit 2) ---------------------
+// --- The per-run stop handler (SIGINT/SIGTERM/SIGHUP → park `stopped`, exit 2) --------------
 
 // A controllable stop seam: capture the handler `runLoop` installs, fire it on demand, and report
 // whether the run unsubscribed it. Tests drive a stop through this rather than a real signal.
 const makeStopControl = () => {
-  let cb: ((s: "SIGINT" | "SIGTERM") => void) | undefined;
+  let cb: ((s: "SIGINT" | "SIGTERM" | "SIGHUP") => void) | undefined;
   let unsubscribed = false;
   const onStop: LoopDeps["onStop"] = (c) => {
     cb = c;
@@ -1593,7 +1593,7 @@ const makeStopControl = () => {
   };
   return {
     onStop,
-    fire: (s: "SIGINT" | "SIGTERM" = "SIGINT") => cb?.(s),
+    fire: (s: "SIGINT" | "SIGTERM" | "SIGHUP" = "SIGINT") => cb?.(s),
     get unsubscribed() {
       return unsubscribed;
     },
@@ -1604,7 +1604,7 @@ const makeStopControl = () => {
 // settle (an in-flight agent call), reject the pending run when `close()` lands, or just return a
 // result (optionally driving its gate green/red).
 interface StopTurn {
-  fireStop?: "SIGINT" | "SIGTERM";
+  fireStop?: "SIGINT" | "SIGTERM" | "SIGHUP";
   neverSettles?: boolean;
   rejectOnClose?: boolean;
   run?: Partial<SandboxRunResult>;
@@ -1689,6 +1689,29 @@ test("a stop mid-turn parks `stopped` (signal detail + branch), one parked event
     events.some((e) => e.event === "failed"),
     false,
     "a stop is a park, never a failed verdict",
+  );
+  assert.ok(sbx.state.closeCalled >= 1, "the sandbox was closed");
+  assert.ok(control.unsubscribed, "the stop handler is removed when runLoop returns");
+});
+
+test("a SIGHUP mid-turn (a closed terminal) takes the SIGTERM path: parks `stopped` with detail SIGHUP, closes the sandbox", async () => {
+  const cfg = harnessCfg();
+  const control = makeStopControl();
+  const sbx = stopSandbox([{ fireStop: "SIGHUP", neverSettles: true }], control);
+
+  const outcome = await silence(() => runLoop(cfg, "T-1", undefined, undefined, depsFor(sbx, { onStop: control.onStop })));
+
+  assert.equal(outcome, "parked");
+  const parked = listParked(cfg);
+  assert.equal(parked.length, 1);
+  assert.equal(parked[0].reason, "stopped");
+  assert.equal(parked[0].detail, "SIGHUP");
+  assert.equal(parked[0].branch, "agent/T-1");
+  const events = readEventLog(cfg);
+  assert.equal(events.filter((e) => e.event === "parked" && (e as any).reason === "stopped").length, 1);
+  assert.equal(
+    events.some((e) => e.event === "failed"),
+    false,
   );
   assert.ok(sbx.state.closeCalled >= 1, "the sandbox was closed");
   assert.ok(control.unsubscribed, "the stop handler is removed when runLoop returns");
@@ -1907,6 +1930,20 @@ test("defaultLoopDeps.onStop adds exactly one SIGINT and one SIGTERM listener fo
   assert.equal(duringTerm, beforeTerm + 1, "one SIGTERM listener added during the run");
   assert.equal(process.listenerCount("SIGINT"), beforeInt, "the SIGINT listener is removed after runLoop returns");
   assert.equal(process.listenerCount("SIGTERM"), beforeTerm, "the SIGTERM listener is removed after runLoop returns");
+});
+
+test("defaultLoopDeps.onStop treats SIGHUP (a closed terminal) as a stop, and its unsubscribe removes the listener", () => {
+  const before = process.listenerCount("SIGHUP");
+  const seen: string[] = [];
+  const unsubscribe = defaultLoopDeps.onStop((s) => seen.push(s));
+  try {
+    assert.equal(process.listenerCount("SIGHUP"), before + 1, "one SIGHUP listener added while installed");
+    process.emit("SIGHUP", "SIGHUP");
+    assert.deepEqual(seen, ["SIGHUP"], "a SIGHUP is reported as a stop request with signal SIGHUP");
+  } finally {
+    unsubscribe();
+  }
+  assert.equal(process.listenerCount("SIGHUP"), before, "the SIGHUP listener is removed on unsubscribe");
 });
 
 // A stop-capable sandbox whose gate fires the stop while it runs, then takes `gate` ms to finish —

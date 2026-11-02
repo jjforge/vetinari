@@ -156,9 +156,9 @@ The run died with no verdict. [[redrive]] to continue.
 _Avoid_: interrupted.
 
 **stopped**:
-A person stopped the run (SIGINT/SIGTERM) before it reached a verdict; its work is
-kept. It cannot be answered: `vetinari run <id>` continues a standalone run,
-[[redrive]] continues a campaign.
+A person stopped the run (SIGINT/SIGTERM, or SIGHUP when its terminal closed) before
+it reached a verdict; its work is kept. It cannot be answered: `vetinari run <id>`
+continues a standalone run, [[redrive]] continues a campaign.
 
 **outdated-agent**:
 The [[agent]] CLI in the project's sandbox is too old for the configured model, so

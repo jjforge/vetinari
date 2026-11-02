@@ -126,7 +126,7 @@ Membership is an orthogonal axis — `member | grafted | pruned` — so a chip s
 | `conflict` | campaign when a green's retried merge collides again (§6) — the first collision is retried, never parked | no | yes, after the human resolves it |
 | `red-base` | campaign on a red merged base — the wave's reason, carried by `campaign-parked` | no | yes, after fix-forward or prune |
 | `crash` | reconciliation (dead process, no stop marker since the latest wave-start) | no | yes |
-| `stopped` | run loop on SIGINT/SIGTERM before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
+| `stopped` | run loop on SIGINT/SIGTERM/SIGHUP before a verdict (its work is kept) | no | yes — a redrive, or `vetinari run <id>` for a standalone run |
 | `outdated-agent` | run loop when the agent call throws the provider's "CLI too old for this model" error (`detail` is that line; only `claude` has a pattern) | no | yes — after updating the agent CLI in the project's sandbox (`vetinari build` for the default Docker image); a redrive, or `vetinari run <id>` for a standalone run |
 
 ### 2.4 Roll-ups

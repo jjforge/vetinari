@@ -435,10 +435,10 @@ export function reduceCampaign(events: OrchestratorEvent[], opts: { alive?: bool
         dropTarget,
       });
       for (const id of applied.dropped) {
-        // A dropped conflict-parked target reads as a pruned member that never started: its pending
-        // green is gone, so a redrive neither re-integrates nor crash-folds it, and its conflict no
-        // longer holds the wave.
-        if (id === dropTarget && conflictParked.delete(id)) {
+        // A dropped conflict-parked or failed target reads as a pruned member that never started:
+        // its pending green is gone, so a redrive neither re-integrates nor crash-folds it, and its
+        // conflict or failure no longer holds the wave.
+        if (id === dropTarget && (conflictParked.delete(id) || outcomes.get(id) === "failed")) {
           pendingGreen.delete(id);
           outcomes.delete(id);
         }

@@ -3323,6 +3323,38 @@ test("a redrive after a manual prune of a conflict-parked target neither spawns 
   assert.ok(reduceCampaign(events).closedWaves.has(0));
 });
 
+test("a redrive after a manual prune of a failed target neither spawns nor re-integrates it, and closes the wave (#703)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-redrive-pruned-failed-"));
+  const cfg = harnessCfg(dir);
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 4, weight: 1 };
+  cfg.log.log("campaign-start", { waves: [["101", "701"], ["702"]], slots: 4 });
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
+  cfg.log.log("merged", { taskId: "101" });
+  cfg.log.log("green", { taskId: "701", branch: "agent/701", commits: ["a"] });
+  cfg.log.log("failed", { taskId: "701", detail: "Merge with strategy ort failed." });
+  cfg.log.log("campaign-failed", { index: 0, detail: "701 failed" });
+  // The operator follows the failure notice's advice: `prune 701`, which takes its dependent 702 too.
+  cfg.log.log("prune", { target: "701", removed: ["701", "702"], dropped: ["702"], dropTarget: true });
+  // A redrive that ran before the fix still re-entered 701 and failed it again (#703's report).
+  cfg.log.log("wave-start", { index: 0, tasks: ["101", "701"] });
+  cfg.log.log("merged", { taskId: "101", branch: "agent/101", alreadyMerged: true });
+  cfg.log.log("failed", { taskId: "701", detail: "Merge with strategy ort failed." });
+  cfg.log.log("campaign-failed", { index: 0, detail: "701 failed" });
+
+  const spawned: string[] = [];
+  const integrated: string[][] = [];
+  const ok = await silenceConsole(() => campaign(cfg, [], host, undefined, { resume: true }, recordingDeps(cfg, spawned, integrated)));
+
+  assert.equal(ok, "done");
+  assert.ok(!spawned.includes("701"), "the pruned target is not respawned");
+  assert.ok(
+    integrated.every((greens) => !greens.includes("701")),
+    "the pruned target's failed merge is not retried",
+  );
+  const events = readEventLog(cfg);
+  assert.ok(reduceCampaign(events).closedWaves.has(0));
+});
+
 // ── the vetinari-paths check through a campaign (#607) ──
 // The real `integrateGreens` runs in a scratch repo: member 101's branch edits `vetinari/config.mts`,
 // and the campaign resolves what its brief declares from the live issue on each integration pass.

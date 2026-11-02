@@ -116,8 +116,8 @@ export interface AppliedPrune {
  *
  * `opts.dropTarget` names a manual prune's target (ADR 0005): when that target is
  * conflict-parked (`campaign.conflictParked`) — a pending green held off the base by a merge
- * conflict — it is dropped like a parked member and its record cleared. Only the target: a
- * conflict-parked dependent in the closure is kept. Auto-prune never passes it (ADR 0013).
+ * conflict — or failed, it is dropped like a parked member (a conflict park's record cleared). Only the target:
+ * a conflict-parked or failed dependent in the closure is kept. Auto-prune never passes it (ADR 0013).
  */
 export function applyPrune(
   campaign: { waves: string[][]; outcomes: Map<string, string>; conflictParked?: ReadonlySet<string> },
@@ -135,9 +135,9 @@ export function applyPrune(
   const dropTarget = opts.dropTarget === undefined ? undefined : normalize(opts.dropTarget);
   for (const id of removed.map(normalize)) {
     if (!inPlan.has(id)) continue;
-    if (id === dropTarget && campaign.conflictParked?.has(id)) {
+    if (id === dropTarget && (campaign.conflictParked?.has(id) || campaign.outcomes.get(id) === "failed")) {
       dropped.push(id);
-      parkedToClear.push(id);
+      if (campaign.conflictParked?.has(id)) parkedToClear.push(id);
       continue;
     }
     const status = campaign.outcomes.get(id) ?? "unstarted";

@@ -34,8 +34,10 @@ green: a target that a merge conflict parked (ADR 0013). Its green cannot land
 until the conflict is resolved, so the operator's `prune <issue>` — the conflict
 notice's own advice — drops it, clears its parked record, and folds it to a
 pruned member that never started; its work stays on the kept branch unless
-`--purge`. Only the target gets this: a conflict-parked *dependent* in the
-closure is kept until it is itself pruned. `campaign --auto-prune` never drops
+`--purge`. A **failed** target leaves the same way: the failure notice advises
+`prune <issue>`, and a failed member would otherwise hold its wave and fail
+every redrive. Only the target gets this: a conflict-parked or failed
+*dependent* in the closure is kept until it is itself pruned. `campaign --auto-prune` never drops
 its conflict target — that target still holds its wave. The fold recomputes
 the drop on every replay, so `prune` records the exception as `dropTarget` on
 its event; an event without the marker (every auto-prune, every older log)

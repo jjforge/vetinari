@@ -15,6 +15,7 @@ import {
   type DisplayStatus,
   type IssuePhase,
   type Membership,
+  type ReducedCampaign,
   type WaveStatus,
   answeredAwaitingReadmit,
   issueLifecycle,
@@ -183,7 +184,7 @@ const closedWaveTimeSplits = (events: OrchestratorEvent[]): Map<string, WaveTime
  * log archived or emptied — keeps every surviving record, so a park that outlived its log
  * still counts (#232).
  */
-const parkedInCurrentPlan = (
+export const parkedInCurrentPlan = (
   records: ParkedRecord[],
   plan: { waves: string[][]; closedWaves: Set<number>; outcomes: Map<string, string> },
 ): ParkedRecord[] => {
@@ -198,6 +199,14 @@ const parkedInCurrentPlan = (
     );
   });
 };
+
+/**
+ * The in-plan parked records ({@link parkedInCurrentPlan}) still held on a human — `status.parked`,
+ * the set the parked panel, `/status` and `vetinari parked` all read (#685). An answered park a
+ * live campaign will re-admit is no longer held, so it drops out.
+ */
+export const heldParkedRecords = (inPlan: ParkedRecord[], reduced: ReducedCampaign, alive: boolean | undefined): ParkedRecord[] =>
+  inPlan.filter((parked) => !answeredAwaitingReadmit(reduced, normalize(parked.taskId), alive));
 
 /**
  * Reconstruct a project's live campaign status off its event log (ADR 0005/0019).
@@ -230,7 +239,7 @@ export function buildStatus(cfg: ResolvedConfig, opts: { dead?: boolean; alive?:
   }
   // An answered park a live campaign will re-admit is no longer held on a human: it reads
   // `running` (the lifecycle overlay below) and leaves the parked panel and every PARKED count.
-  const shownParked = parkedRecords.filter((parked) => !answeredAwaitingReadmit(reduced, normalize(parked.taskId), alive));
+  const shownParked = heldParkedRecords(parkedRecords, reduced, alive);
 
   // Display waves render off `layout` (the pre-prune membership) so a pruned issue still
   // shows as a chip in the wave it left (ADR 0007). Each chip carries both axes; the wave's

@@ -33,7 +33,6 @@ import {
   pollTargets,
   groupChatAllowlistWarnings,
   liveAllowlistPoll,
-  REDRIVE_ONLY_REASONS,
   reconcilePollTargets,
   supervisePolls,
   trackPollTicks,
@@ -45,7 +44,7 @@ import {
   type SendRef,
 } from "./gateway.ts";
 import type { CampaignStatus, StatusWave, StatusIssue } from "./status.ts";
-import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
+import { PARK_REASON_FACTS, recoverySentence } from "./park-reasons.ts";
 import { newReplyIndex } from "./reply-index.ts";
 import { Refusal } from "./refusal.ts";
 
@@ -971,7 +970,7 @@ test("parkRecoveryMove prints the exact move each reason asks of the human", () 
   // The redrive-only reasons read the shared table's move as a sentence (#578).
   assert.equal(parkRecoveryMove("conflict", "640"), "Resolve the conflict on the base, then `vetinari redrive`.");
   for (const reason of ["red-base", "crash", "stopped", "outdated-agent"] as const) {
-    assert.equal(parkRecoveryMove(reason, "640"), recoverySentence(PARK_RECOVERY[reason], "640"));
+    assert.equal(parkRecoveryMove(reason, "640"), recoverySentence(PARK_REASON_FACTS[reason].issueMove, "640"));
   }
   assert.match(parkRecoveryMove("stopped", "640"), /`vetinari run 640`/);
 });
@@ -982,14 +981,14 @@ test("parkRecoveryMove: `stopped` is redrive-only and names the standalone `run`
   assert.match(parkRecoveryMove("stopped", "12"), /redrive/);
   assert.match(parkRecoveryMove("stopped", "12"), /vetinari run 12/);
   assert.doesNotMatch(parkRecoveryMove("stopped", "12"), /reply/i);
-  assert.ok(REDRIVE_ONLY_REASONS.has("stopped"), "a stopped record cannot be answered, so it is redrive-only");
+  assert.ok(!PARK_REASON_FACTS.stopped.answerable, "a stopped record cannot be answered, so it is redrive-only");
 });
 
 test("parkRecoveryMove: `outdated-agent` is redrive-only and names `vetinari build`, then redrive (#444)", () => {
   const move = parkRecoveryMove("outdated-agent", "12");
   assert.match(move, /vetinari build[\s\S]*redrive/);
   assert.doesNotMatch(move, /reply/i);
-  assert.ok(REDRIVE_ONLY_REASONS.has("outdated-agent"));
+  assert.ok(!PARK_REASON_FACTS["outdated-agent"].answerable);
   assert.match(campaignParkMove("outdated-agent"), /vetinari build[\s\S]*redrive/);
 });
 

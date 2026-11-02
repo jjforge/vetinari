@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { dispatch, identityLine, parseArgs, type Command, type DispatchDeps } from "./cli-dispatch.ts";
@@ -8,6 +8,10 @@ import { LiveCampaignRefusal, projectHasLiveCampaign, registerProject } from "./
 import { GraftRejectedError } from "./graft.ts";
 import { Refusal } from "./refusal.ts";
 import { withEnv } from "./test-support.ts";
+import { buildStatus } from "./dashboard-status.ts";
+import { readEventLog } from "./event-log.ts";
+import { formatGatewayStatus } from "./gateway.ts";
+import { answerParked, listParked, writeParkedRecord, type ParkReason } from "./state.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -420,6 +424,89 @@ test("dispatch parked names a redrive-only park and its recovery when no per-iss
   assert.doesNotMatch(out, /reply/i, "a red-base park is not answered by a reply");
 });
 
+// The parity the `parked` listing and the gateway's `/status` keep (#685): over one campaign on disk —
+// its event log and parked records — both name the same redrive-only hold, and the same move, or neither does.
+const holdParity = async (events: unknown[], records: { taskId: string; reason: ParkReason; answer?: string }[], alive = false) => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-hold-parity-"));
+  const cfg = {
+    project: "demo",
+    stateDir: dir,
+    parkedDir: join(dir, "parked"),
+    logFile: join(dir, "logs", "orchestrator.jsonl"),
+    log: { log: () => {} },
+  } as unknown as DispatchDeps["cfg"];
+  mkdirSync(join(dir, "logs"), { recursive: true });
+  writeFileSync(cfg.logFile, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  for (const { taskId, reason, answer } of records) {
+    writeParkedRecord(cfg, { taskId, reason, branch: `agent/${taskId}`, question: "?" });
+    if (answer) answerParked(cfg, taskId, answer);
+  }
+  const { deps, logged } = makeDeps({
+    cfg,
+    readEventLog: (c) => readEventLog(c),
+    listParked: (c) => listParked(c),
+    projectHasLiveCampaign: () => alive,
+  });
+  await dispatch({ kind: "parked" }, deps);
+  const cli = /^campaign parked \(([a-z-]+)\) — (.*)$/m.exec(logged.join("\n"));
+  const gateway = /^ {2}⏸ ([a-z-]+) — (.*)$/m.exec(formatGatewayStatus([buildStatus(cfg, { alive })]));
+  return { cli: cli && [cli[1], cli[2]], gateway: gateway && [gateway[1], gateway[2]] };
+};
+
+const RED_BASE_HOLD = ["red-base", "Fix forward on the base, then `vetinari redrive`."];
+
+test("`vetinari parked` and `/status` name the same hold for a red-base campaign (#685)", async () => {
+  const { cli, gateway } = await holdParity(redBaseParkedCampaign(), []);
+  assert.deepEqual(cli, RED_BASE_HOLD);
+  assert.deepEqual(gateway, RED_BASE_HOLD);
+});
+
+test("`vetinari parked` and `/status` name the same hold for a crashed campaign (#685)", async () => {
+  const crashed = [
+    { event: "campaign-start", waves: [["436"]] },
+    { event: "wave-start", index: 0, tasks: ["436"] },
+    { event: "spawn", taskId: "436" },
+  ];
+  const { cli, gateway } = await holdParity(crashed, [], false);
+  assert.deepEqual(cli, ["crash", "`vetinari redrive`."]);
+  assert.deepEqual(gateway, cli);
+});
+
+test("`vetinari parked` and `/status` name no hold once the parked wave is pruned (#685)", async () => {
+  const pruned = [
+    { event: "campaign-start", waves: [["436"], ["437"]] },
+    { event: "wave-start", index: 0, tasks: ["436"] },
+    { event: "green", taskId: "436" },
+    { event: "merged", taskId: "436" },
+    { event: "wave-done", index: 0, merged: ["436"] },
+    { event: "wave-start", index: 1, tasks: ["437"] },
+    { event: "parked", taskId: "437", reason: "crash" },
+    { event: "prune", target: "437", removed: ["437"], dropped: ["437"] },
+  ];
+  const { cli, gateway } = await holdParity(pruned, []);
+  assert.equal(cli, null);
+  assert.equal(gateway, null);
+});
+
+test("`vetinari parked` and `/status` name no hold while a parked record is listed (#685)", async () => {
+  const question = [
+    { event: "campaign-start", waves: [["436"]] },
+    { event: "wave-start", index: 0, tasks: ["436"] },
+    { event: "parked", taskId: "436", reason: "question" },
+    { event: "campaign-parked", index: 0 },
+  ];
+  const { cli, gateway } = await holdParity(question, [{ taskId: "436", reason: "question" }]);
+  assert.equal(cli, null);
+  assert.equal(gateway, null);
+});
+
+test("`vetinari parked` and `/status` both name a red-base hold beside an out-of-plan parked record (#685)", async () => {
+  // A superseded campaign's leftover record is out of this plan, so it holds nothing here.
+  const { cli, gateway } = await holdParity(redBaseParkedCampaign(), [{ taskId: "999", reason: "question" }]);
+  assert.deepEqual(cli, RED_BASE_HOLD);
+  assert.deepEqual(gateway, RED_BASE_HOLD);
+});
+
 test("dispatch parked reports nothing parked when no records and no campaign in flight (#391)", async () => {
   const { deps, logged } = makeDeps(); // listParked → [] and readEventLog → [] by default
   await dispatch({ kind: "parked" }, deps);
@@ -670,10 +757,33 @@ for (const postComment of [undefined, async () => {}]) {
       () => dispatch({ kind: "answer", taskId: "436", text: ["do", "it"] }, deps),
       (err: Error) =>
         err instanceof Refusal &&
-        err.message ===
-          "436 parked on a merge conflict — it cannot be answered. Resolve the conflict on the base, then `vetinari redrive`.",
+        err.message === "`436` is parked (`conflict`) and can't be answered. Resolve the conflict on the base, then `vetinari redrive`.",
     );
     assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered to a conflict record");
+    assert.equal((deps.campaign as any).calls.length, 0);
+    assert.equal((deps.runLoop as any).calls.length, 0);
+  });
+}
+
+// One refusal for every redrive-only park (#685): the reason named, then its per-issue move as a sentence.
+const UNANSWERABLE_REFUSALS = {
+  stopped:
+    "`42` is parked (`stopped`) and can't be answered. `vetinari redrive` to resume the campaign, or `vetinari run 42` for a standalone run.",
+  "outdated-agent":
+    "`42` is parked (`outdated-agent`) and can't be answered. Update the agent CLI in the project's sandbox (`vetinari build` for the default Docker image), then `vetinari redrive`.",
+  conflict: "`42` is parked (`conflict`) and can't be answered. Resolve the conflict on the base, then `vetinari redrive`.",
+};
+for (const [reason, message] of Object.entries(UNANSWERABLE_REFUSALS)) {
+  test(`dispatch answer on a \`${reason}\` record refuses with the one unanswerable-park wording and delivers nothing (#685)`, async () => {
+    const { deps } = makeDeps({
+      hasParked: spy(true) as any,
+      listParked: spy([{ taskId: "42", reason, branch: "agent/42", parkedAt: "t", question: "?" }]) as any,
+    });
+    await assert.rejects(
+      () => dispatch({ kind: "answer", taskId: "42", text: ["do", "it"] }, deps),
+      (err: Error) => err instanceof Refusal && err.message === message,
+    );
+    assert.equal((deps.answerParked as any).calls.length, 0, "nothing is delivered");
     assert.equal((deps.campaign as any).calls.length, 0);
     assert.equal((deps.runLoop as any).calls.length, 0);
   });
@@ -2004,6 +2114,30 @@ test("dispatch campaign refuses a fresh planned launch over a red-base park, nam
   );
   assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the red-base park is not archived");
   assert.equal((deps.runCampaignPlan as any).calls.length, 0, "refused before planning");
+  assert.equal((deps.campaign as any).calls.length, 0);
+});
+
+test("dispatch campaign still refuses a fresh launch over a red-base park whose wave also holds a conflict record (#685)", async () => {
+  // The guard asks the hold over no records, so a record listed in the same wave never masks the red base.
+  const redBaseWithConflict = [
+    { event: "campaign-start", waves: [["436", "438"]] },
+    { event: "wave-start", index: 0, tasks: ["436", "438"] },
+    { event: "green", taskId: "436" },
+    { event: "merged", taskId: "436" },
+    { event: "green", taskId: "438" },
+    { event: "parked", taskId: "438", reason: "conflict" },
+    { event: "campaign-parked", index: 0, reason: "red-base", detail: "merged base gated red" },
+  ];
+  const { deps } = makeDeps({
+    readEventLog: spy(redBaseWithConflict) as any,
+    listParked: spy([{ taskId: "438", reason: "conflict", branch: "agent/438", parkedAt: "t", question: "conflict" }]) as any,
+    expandSelection: spy(Promise.resolve(["437"])) as any,
+  });
+  await assert.rejects(
+    () => dispatch(campaignCmd({ positional: ["437"] }), deps),
+    (err: Error) => err instanceof Refusal && /red merged base at wave 1/.test(err.message) && /vetinari redrive/.test(err.message),
+  );
+  assert.equal((deps.archiveLeftoverRun as any).calls.length, 0, "the red-base park is not archived");
   assert.equal((deps.campaign as any).calls.length, 0);
 });
 

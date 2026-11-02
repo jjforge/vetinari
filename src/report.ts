@@ -12,7 +12,7 @@
  */
 import type { OrchestratorEvent } from "./event-log.ts";
 import type { SlowGates } from "./slow-gates.ts";
-import { PARK_RECOVERY } from "./park-recovery.ts";
+import { PARK_REASON_FACTS } from "./park-reasons.ts";
 import { isFailedOutcome } from "./child-run.ts";
 
 /** How the terminal renders one issue: `#<id>`, plus the resolved title when the run has one. */
@@ -282,14 +282,14 @@ export function formatStop(stop: Stop): string {
       const tail = keptTail(stop.merged, stop.index, stop.total);
       return (
         `🅿 campaign parked at ${pos} — ${stop.parked.map((p) => `#${p}`).join(", ")}: the agent CLI is too old for the model (outdated-agent); ${tail}\n` +
-        `recover: ${PARK_RECOVERY["outdated-agent"]}`
+        `recover: ${PARK_REASON_FACTS["outdated-agent"].issueMove}`
       );
     }
     case "red-base": {
       const tail = keptTail(stop.merged, stop.index, stop.total);
       return (
         `🅿 campaign parked at ${pos} — merged base is red (red-base); ${tail}\n` +
-        `recover: ${PARK_RECOVERY["red-base"]} — or \`vetinari prune <id>\``
+        `recover: ${PARK_REASON_FACTS["red-base"].issueMove} — or \`vetinari prune <id>\``
       );
     }
     case "conflict": {
@@ -297,7 +297,7 @@ export function formatStop(stop: Stop): string {
       const id = stop.conflicted[0];
       return (
         `🅿 campaign parked at ${pos} — merge conflict on ${stop.conflicted.map((c) => `#${c}`).join(", ")} (conflict); ${tail}\n` +
-        `recover: ${PARK_RECOVERY.conflict} (or \`vetinari prune ${id}\`)`
+        `recover: ${PARK_REASON_FACTS.conflict.issueMove} (or \`vetinari prune ${id}\`)`
       );
     }
     case "stranded-conflict": {

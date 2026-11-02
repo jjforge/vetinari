@@ -33,20 +33,11 @@ import {
   type ChildVerdict,
 } from "./child-run.ts";
 import { defaultFileSet, hasFileSetMarker, ticketProse } from "./fileset.ts";
-import {
-  UNASKED_PARK_REASONS,
-  clearParked,
-  enqueueOutbound,
-  hasParked,
-  isAnswered,
-  listParked,
-  readParked,
-  type ParkReason,
-} from "./state.ts";
+import { clearParked, enqueueOutbound, hasParked, isAnswered, listParked, readParked, type ParkReason } from "./state.ts";
 import { strandedByConflict, resumeIndex, type StrandedImpact } from "./prune.ts";
 import { normalize } from "./issue-id.ts";
 import { notice, type Notice } from "./notice.ts";
-import { PARK_RECOVERY } from "./park-recovery.ts";
+import { PARK_REASON_FACTS } from "./park-reasons.ts";
 import { Refusal } from "./refusal.ts";
 import { gitRead } from "./git-read.ts";
 import { tgSend, tgWaitReply, type TgConn } from "./telegram.ts";
@@ -765,7 +756,7 @@ export function conflictParkedNotice(
     state: "PARKED",
     context: `wave ${waveNumber}`,
     signal: `Merge conflict on ${conflictParked.map((q) => `#${q}`).join(", ")} — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
-    recover: `${PARK_RECOVERY.conflict} (or \`prune <issue>\`)`,
+    recover: `${PARK_REASON_FACTS.conflict.issueMove} (or \`prune <issue>\`)`,
     category: "failure",
     event: "campaign-parked",
   });
@@ -832,7 +823,7 @@ export function memberOutdatedAgentNotice(
     state: "PARKED",
     context: `wave ${waveNumber}`,
     signal: `${parked.map((p) => `#${p}`).join(", ")}: the agent CLI is too old for the model — greens (${merged.join(", ") || "none"}) kept on ${baseBranch}, campaign paused.`,
-    recover: PARK_RECOVERY["outdated-agent"],
+    recover: PARK_REASON_FACTS["outdated-agent"].issueMove,
     category: "failure",
     event: "campaign-parked",
   });
@@ -1410,7 +1401,7 @@ async function drainCampaignWave(
     };
     const stoppedIds = new Set(
       listParked(cfg)
-        .filter((r) => UNASKED_PARK_REASONS.has(r.reason))
+        .filter((r) => PARK_REASON_FACTS[r.reason]?.asksNothing)
         .map((r) => normalize(r.taskId)),
     );
     const { toRun, pre, resume } = reconcileResumeWave(

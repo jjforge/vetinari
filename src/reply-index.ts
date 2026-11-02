@@ -7,7 +7,8 @@
  */
 
 import { questionDestinations } from "./config.ts";
-import { parkedDirOf, setParkedMessageId, UNASKED_PARK_REASONS, type ParkedRecord } from "./state.ts";
+import { PARK_REASON_FACTS } from "./park-reasons.ts";
+import { parkedDirOf, setParkedMessageId, type ParkedRecord } from "./state.ts";
 import type { TgConn } from "./telegram.ts";
 import type { Announcement, GatewayProject, SendRef } from "./gateway.ts";
 
@@ -70,7 +71,7 @@ export function questionDestinationName(project: Pick<GatewayProject, "notify">)
 function routable(project: GatewayProject): { conn: TgConn; records: ParkedRecord[] } | undefined {
   const conn = resolveQuestionConn(project);
   if (!conn) return undefined;
-  return { conn, records: project.parked.filter((r) => !UNASKED_PARK_REASONS.has(r.reason)) };
+  return { conn, records: project.parked.filter((r) => !PARK_REASON_FACTS[r.reason]?.asksNothing) };
 }
 
 // NUL-joined keys: a Telegram message id is unique only within a chat, so a reply

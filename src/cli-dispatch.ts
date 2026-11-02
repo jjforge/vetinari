@@ -44,14 +44,13 @@ import type { runGraft } from "./graft.ts";
 import { GraftRejectedError, describeGraftRejections } from "./graft.ts";
 import { describeReplan, type runReplan } from "./replan.ts";
 import type { OrchestratorEvent, readEventLog } from "./event-log.ts";
-import { campaignStarted, campaignState, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./campaign-fold.ts";
+import { campaignStarted, issueLifecycle, reduceCampaign, waveState, type ReducedCampaign } from "./campaign-fold.ts";
 import { extractParkedDetails } from "./dashboard-event-text.ts";
-import { stopPending } from "./dashboard-status.ts";
-import { campaignParkMove, REDRIVE_ONLY_REASONS } from "./gateway.ts";
+import { heldParkedRecords, parkedInCurrentPlan, stopPending } from "./dashboard-status.ts";
 import { formatBaseGateEstimate, makeReporter } from "./report.ts";
 import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
-import { PARK_RECOVERY, recoverySentence } from "./park-recovery.ts";
+import { PARK_REASON_FACTS, campaignParkHold, recoverySentence, type ParkHoldCampaign } from "./park-reasons.ts";
 import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 import type { credentialsExposureWarning } from "./registry.ts";
 import { launch, reactToLiveCampaign } from "./launch.ts";
@@ -83,32 +82,22 @@ const enableJson = (on: boolean): void => {
 export type AgentOverride = { provider?: string; model?: string; effort?: string };
 
 /**
- * The redrive-only reason a campaign is parked on when it has left no answerable per-issue record —
- * `red-base`/`conflict`/`crash`. Such a park writes no record (`src/archive.ts`), so the record-only
- * `parked` listing reports "nothing parked" while the campaign sits parked; this reads the campaign's
- * own fold instead. Returns the reason only when the reduced plan folds to `parked` on a redrive-only
- * hold — the wave-level `red-base`, or failing that a member held `conflict`/`crash` — so the listing
- * can name the recovery that applies rather than the answer-a-question dead end. Undefined otherwise
- * (running/failed/done/idle, or an answerable question/stalled hold whose record is listed instead).
+ * The campaign as {@link campaignParkHold} reads it, built from the reduced plan the CLI already
+ * holds — the same waves, wave-level holds (`red-base`, an operator `stopped`) and member
+ * lifecycles `/status` reads off `CampaignStatus` — beside the parked records still held in it.
  */
-function redriveOnlyParkReason(reduced: ReducedCampaign): ParkReason | undefined {
-  if (!reduced.waves.length) return undefined;
-  const waveStates = reduced.waves.map((wave) =>
-    waveState(
-      wave.map((id) => ({ status: issueLifecycle(reduced, id).state })),
-      { redBase: wave.some((id) => reduced.redBase.has(id)), stopped: wave.some((id) => reduced.stopped.has(id)) },
-    ),
-  );
-  if (campaignState(waveStates) !== "parked") return undefined;
-  if (reduced.redBase.size) return "red-base";
-  if (reduced.stopped.size) return "stopped";
-  for (const wave of reduced.waves)
-    for (const id of wave) {
-      const { state, reason } = issueLifecycle(reduced, id);
-      if (state === "parked" && reason && REDRIVE_ONLY_REASONS.has(reason)) return reason;
-    }
-  return undefined;
-}
+const parkHoldOf = (reduced: ReducedCampaign, parked: readonly unknown[], alive?: boolean): ParkHoldCampaign => ({
+  waves: reduced.waves.map((wave) => {
+    const issues = wave.map((id) => {
+      const { state, reason } = issueLifecycle(reduced, id, { alive });
+      return { status: state, reason };
+    });
+    const redBase = wave.some((id) => reduced.redBase.has(id));
+    const stopped = wave.some((id) => reduced.stopped.has(id));
+    return { status: waveState(issues, { redBase, stopped }), reason: redBase ? "red-base" : stopped ? "stopped" : undefined, issues };
+  }),
+  parked,
+});
 
 /**
  * One command form, discriminated on `kind`. `parseArgs` maps each subcommand of the
@@ -571,17 +560,17 @@ export async function dispatch(cmd: Command, deps: DispatchDeps): Promise<void> 
     }
     case "parked": {
       const recs = deps.listParked(cfg);
-      if (!recs.length) {
-        // A redrive-only park (red-base/conflict/crash) writes no per-issue record by design
-        // (src/archive.ts), so reading records alone would misreport a parked campaign as idle and
-        // advise answering a question nobody asked. Consult the campaign's own fold: name the hold
-        // and the recovery it needs when one is held, else it really is nothing parked. The liveness
-        // probe lets a crashed run's in-flight members reconcile to parked{crash} (design §7).
-        const alive = deps.projectHasLiveCampaign(deps.host.configDir, cfg.project);
-        const reason = redriveOnlyParkReason(reduceCampaign(deps.readEventLog(cfg), { alive }));
-        deps.log(reason ? `campaign parked (${reason}) — ${campaignParkMove(reason)}` : "nothing parked");
-        return;
-      }
+      // A red-base/crash park writes no per-issue record (src/archive.ts), and a record outside the
+      // current plan holds nothing, so reading records alone would misreport a parked campaign as
+      // idle. Ask the campaign's own fold, over the records still held in its plan — the set
+      // `/status` reads — so both name the same hold (#685). The liveness probe lets a crashed
+      // run's in-flight members reconcile to parked{crash} (design §7).
+      const alive = deps.projectHasLiveCampaign(deps.host.configDir, cfg.project);
+      const reduced = reduceCampaign(deps.readEventLog(cfg), { alive });
+      const held = heldParkedRecords(parkedInCurrentPlan(recs, reduced), reduced, alive);
+      const hold = campaignParkHold(parkHoldOf(reduced, held, alive));
+      if (hold) deps.log(`campaign parked (${hold}) — ${recoverySentence(PARK_REASON_FACTS[hold].campaignMove, "")}`);
+      else if (!recs.length) deps.log("nothing parked");
       for (const r of recs) {
         // Parse the agent's structured question (#384) so no raw <summary>/<detail>/<option>
         // tags reach the terminal, reusing #370's shared parser; a terminal reader has no
@@ -722,7 +711,8 @@ async function dispatchCampaign(cmd: Extract<Command, { kind: "campaign" }>, dep
   // anyway, and a `--dry-run` archives nothing, so neither refuses.
   if (!cmd.dryRun && !cmd.supersede) {
     const reduced = reduceCampaign(deps.readEventLog(cfg));
-    if (redriveOnlyParkReason(reduced) === "red-base")
+    // No records are passed: a red-base park refuses even beside a record listed in its wave.
+    if (campaignParkHold(parkHoldOf(reduced, [])) === "red-base")
       throw new Refusal(
         `campaign: the last campaign is parked on a red merged base at wave ${reduced.parkedWave + 1} — fix forward on the base, ` +
           "then run `vetinari redrive` (or pass --supersede to archive it and start fresh).",
@@ -979,26 +969,17 @@ async function dispatchAnswer(cmd: Extract<Command, { kind: "answer" }>, deps: D
     return;
   }
 
-  // A `stopped` park cannot be answered (this issue): a person stopped the run before a verdict,
-  // so there is no question to resolve — only a resume move. Refuse before delivering anything,
-  // naming the moves (a redrive for a campaign, `vetinari run <id>` for a standalone run). Every
-  // gateway reply ends up here, so this also refuses a reply to an old question message for a task
-  // whose current record is `stopped`.
+  // A redrive-only park cannot be answered (#685): a `stopped` run reached no verdict, an
+  // `outdated-agent` one needs the agent CLI updated, and a `conflict` member is green with only its
+  // merge conflicted — an answer would re-run it fresh. Refuse before delivering anything, naming
+  // the reason and its move. Every gateway reply ends up here, so this also refuses a reply to an
+  // old question message for a task whose current record is redrive-only.
   const rec = deps.listParked(cfg).find((r) => normalize(r.taskId) === normalize(taskId));
   const reason = rec?.reason;
-  if (reason === "stopped")
+  if (reason && PARK_REASON_FACTS[reason]?.answerable === false)
     throw new Refusal(
-      `${taskId} was stopped before it reached a verdict — it cannot be answered. Resume it with \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
+      `\`${taskId}\` is parked (\`${reason}\`) and can't be answered. ${recoverySentence(PARK_REASON_FACTS[reason].issueMove, taskId)}`,
     );
-  // An `outdated-agent` park (#444) asked nothing either: the agent CLI is too old for the model.
-  if (reason === "outdated-agent")
-    throw new Refusal(
-      `${taskId} parked because the agent CLI is too old for the model — it cannot be answered. Update the agent CLI in the project's sandbox (\`vetinari build\` for the default Docker image), then \`vetinari redrive\` (a campaign) or \`vetinari run ${taskId}\` (a standalone run).`,
-    );
-  // A `conflict` park asked nothing either: the member is green and only its merge conflicted, so
-  // an answer would re-run it fresh instead of integrating it. Refused whether or not postComment is set.
-  if (reason === "conflict")
-    throw new Refusal(`${taskId} parked on a merge conflict — it cannot be answered. ${recoverySentence(PARK_RECOVERY.conflict, taskId)}`);
 
   // A session-less park (an idle stall can save one) re-runs fresh with the answer relayed as a
   // comment, so with no `postComment` it could never be consumed — refuse now, not at re-admit (#496).

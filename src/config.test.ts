@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { githubFetchTask } from "./index.ts";
 import {
   AGENT_PROVIDERS,
+  applyHostEnv,
   assertProjectQualifier,
   containerShareWeight,
   encodeAgentOverride,
@@ -26,10 +27,12 @@ import {
   repoForProject,
   resolveAgentSelection,
   isResumableProvider,
+  resolveConfig,
   resolveConfigPath,
   resolveDestination,
   resolveProjectRoot,
   type Destination,
+  type VetinariConfig,
 } from "./config.ts";
 import { withEnv } from "./test-support.ts";
 
@@ -48,6 +51,17 @@ const writeConfig = (baseDir: string, rel: string, body = CONFIG_BODY) => {
   writeFileSync(full, body);
   return full;
 };
+
+// The raw config `resolveConfig` takes — what a config file's default export would be.
+const RAW: VetinariConfig = {
+  project: "demo",
+  image: "img",
+  baseBranch: "main",
+  gates: [{ cmd: "true" }],
+  fetchTask: (id) => id,
+};
+// Stands in for the config file's path in refusal messages.
+const CFG_PATH = "vetinari/config.mts";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "vetinari-config-"));
 
@@ -186,6 +200,22 @@ test("loadConfig lets hostEnv override GIT_TERMINAL_PROMPT", async () => {
   // Names the key only to restore it — loadConfig itself writes GIT_TERMINAL_PROMPT.
   await withEnv({ GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT }, async () => {
     await loadConfig(writeConfig(scratch(), "vetinari/config.mts", withPrompt));
+    assert.equal(process.env.GIT_TERMINAL_PROMPT, "1");
+  });
+});
+
+test("resolveConfig leaves process.env untouched, even with hostEnv set", () => {
+  const before = { ...process.env };
+  resolveConfig({ ...RAW, hostEnv: { VETINARI_RESOLVE_PROBE: "1", GIT_TERMINAL_PROMPT: "1" } }, CFG_PATH);
+  assert.deepEqual({ ...process.env }, before);
+});
+
+test("applyHostEnv sets GIT_TERMINAL_PROMPT=0, then each hostEnv key, which may override it", () => {
+  withEnv({ GIT_TERMINAL_PROMPT: undefined, VETINARI_APPLY_PROBE: undefined }, () => {
+    applyHostEnv(resolveConfig(RAW, CFG_PATH));
+    assert.equal(process.env.GIT_TERMINAL_PROMPT, "0");
+    applyHostEnv(resolveConfig({ ...RAW, hostEnv: { VETINARI_APPLY_PROBE: "x", GIT_TERMINAL_PROMPT: "1" } }, CFG_PATH));
+    assert.equal(process.env.VETINARI_APPLY_PROBE, "x");
     assert.equal(process.env.GIT_TERMINAL_PROMPT, "1");
   });
 });

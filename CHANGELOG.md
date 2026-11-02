@@ -20,6 +20,12 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — November 2, 2026
+
+**Bug fixes:**
+- [ops] The changelog fold (`vetinari changelog collect`, and a campaign's per-wave fold) no longer adds entries to a release milestone dated the same day, or deletes a milestone's intro text: it adds only to a milestone of its own title dated today, and otherwise starts a new "Collected changes" milestone above it (#697).
+- [user] The dashboard's project page no longer answers `500 internal server error` when one of the project's archived runs predates `wave-start` naming its members; that run's closed waves simply show no time split (#702).
+
 ### Collected changes — November 1, 2026
 
 **Bug fixes:**

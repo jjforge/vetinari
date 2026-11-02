@@ -80,7 +80,8 @@ export function waveTimeSplit(events: OrchestratorEvent[]): WaveTimeSplit {
   const start = events.find((e) => e.event === "wave-start") ?? events[0];
   const done = events.findLast((e) => e.event === "wave-done") ?? events.at(-1);
   const split: WaveTimeSplit = { total: start && done ? tsSeconds(done) - tsSeconds(start) : 0 };
-  const tasks = start?.event === "wave-start" ? start.tasks : [];
+  // An older log's wave-start carries no `tasks` — read it as an unknown membership.
+  const tasks = (start?.event === "wave-start" ? start.tasks : undefined) ?? [];
   const only = (event: string, taskId: string) => events.filter((e) => e.event === event && "taskId" in e && e.taskId === taskId);
   const runs = tasks.map((taskId) => ({ taskId, spawns: only("spawn", taskId), greens: only("green", taskId) }));
   const greens = runs.map((r) => r.greens.at(-1));

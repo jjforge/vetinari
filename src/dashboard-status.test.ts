@@ -1236,6 +1236,18 @@ test("after a prune shifts the wave indices, each time split still lands on the 
   assert.deepEqual(status.waves[1].timeSplit, { total: 180 });
 });
 
+test("buildStatus reads an older log whose wave-start rows carry no member list, rather than throwing (#702)", () => {
+  // Logs from before wave-start named its tasks still sit in the archive; the project page builds
+  // every archived run's status, so one such row took the whole page down with a 500.
+  const dir = join(tmpdir(), `vetinari-status-time-split-taskless-${Date.now()}`);
+  seedState(dir, [
+    event("campaign-start", { ts: "2026-08-22T00:00:00.000Z", waves: [["753"]], slots: 1 }),
+    event("wave-start", { ts: "2026-08-22T00:00:00.000Z" } as never),
+    event("wave-done", { ts: "2026-08-22T00:05:00.000Z", index: 0, merged: ["753"] }),
+  ]);
+  assert.doesNotThrow(() => buildStatus(cfgFor(dir)));
+});
+
 test("a wave started but not yet done carries no time split (#619)", () => {
   const dir = join(tmpdir(), `vetinari-status-time-split-inflight-${Date.now()}`);
   seedState(dir, closedTimedWaveLog.slice(0, -1));

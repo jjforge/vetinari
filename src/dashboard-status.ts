@@ -165,7 +165,7 @@ const closedWaveTimeSplits = (events: OrchestratorEvent[]): Map<string, WaveTime
     else if (e.event === "wave-done" && waveStart >= 0) {
       const wave = events.slice(waveStart, i + 1);
       const split = waveTimeSplit(wave);
-      if (wave[0].event === "wave-start") for (const taskId of wave[0].tasks) splits.set(normalize(taskId), split);
+      if (wave[0].event === "wave-start") for (const taskId of wave[0].tasks ?? []) splits.set(normalize(taskId), split);
       waveStart = -1;
     }
   });

@@ -1944,6 +1944,31 @@ test("dispatch answer for a standalone park (no campaign) delivers then runs the
   assert.deepEqual(exitCodes, [0]); // the standalone green answer exits 0
 });
 
+// Both of answer's starts run the pre-launch checks `redrive` and `run` run (#690): a `~/go/pkg/mod`
+// mount over an image with no agent-owned `~/go/pkg` is refused after the answer is delivered.
+for (const [start, events] of [
+  ["redrive of the paused campaign", pausedCampaignAfterGreen()],
+  ["standalone run", []],
+] as const) {
+  test(`dispatch answer refuses unwritable mount parents before its ${start} starts — the answer is still delivered first (#690)`, async () => {
+    const { deps } = makeDeps({
+      readEventLog: spy(events) as any,
+      readMountParentOwners: spy(new Map([["/home/agent/go", process.getuid!()]])) as any,
+    });
+    const d: DispatchDeps = {
+      ...deps,
+      cfg: { ...deps.cfg, image: "img", mounts: [{ hostPath: "/cache/go", sandboxPath: "~/go/pkg/mod" }] },
+    };
+    await assert.rejects(
+      dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, d),
+      (err: Error) => err instanceof Refusal && /RUN mkdir -p \/home\/agent\/go\/pkg\b/.test(err.message),
+    );
+    assert.deepEqual((d.answerParked as any).calls, [[d.cfg, "436", "ok"]], "the answer is delivered first");
+    assert.equal((d.campaign as any).calls.length, 0, "no campaign starts");
+    assert.equal((d.runLoop as any).calls.length, 0, "no run starts");
+  });
+}
+
 test("dispatch answer runs the same credential preflight as run before delivering (design §3 step 1, §15)", async () => {
   const { deps } = makeDeps();
   await dispatch({ kind: "answer", taskId: "436", text: ["ok"] }, deps);

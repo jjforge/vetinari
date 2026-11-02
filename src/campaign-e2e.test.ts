@@ -137,7 +137,7 @@ const localCampaignDeps = (
     const entry = childRunEntry(start);
     try {
       const outcome = await runLoop(cfg, taskId, undefined, entry, loopDepsFor(scriptFor(taskId)));
-      // Mirror the real child `run`'s exit code (cli-dispatch's `exitCodeFor`): 0 green, 2
+      // Mirror the real child `run`'s exit code (launch's `exitCodeFor`): 0 green, 2
       // parked, 1 failed — the loop now returns `failed` for a thrown turn rather than
       // rethrowing (design §3 step 9), so the child exits 1 without spawnRun's catch.
       return outcome === "green" ? 0 : outcome === "failed" ? 1 : 2;

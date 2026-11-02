@@ -369,7 +369,10 @@ start a small campaign (or trigger any parked question); a `campaign-start` /
 
 - The gateway logs one line per routed record — `gateway-routed` (broadcast
   categories) and `gateway-announced` (a parked `question`), plus
-  `gateway-route-failed` / `gateway-announce-failed` on a send that didn't land.
+  `gateway-route-failed` / `gateway-announce-failed` on a send that didn't land,
+  and `gateway-announce-persist-failed` when a question landed but its message id
+  couldn't be stamped into its parked record (it isn't re-sent this session, and
+  its reply still routes; after a restart it is announced once more).
   A project with no credentials logs `gateway-skip-no-credentials` instead, once
   per gateway start.
   For a systemd service these go to `journalctl --user -u vetinari-gateway`.

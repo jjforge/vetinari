@@ -1080,9 +1080,10 @@ const announceText = (a: Announcement) => formatParkAnnouncement(a.project, a.re
 
 /**
  * Announce every parked question not yet sent to its project's destination, then
- * stamp the returned message id back into the record (which persists "announced"
- * and feeds a later index rebuild) and into the live index (which routes the
- * reply). The caller loads `projects` fresh each tick so questions parked since the
+ * stamp the returned message id into the live index (which routes the reply) and
+ * then back into the record (which persists "announced" and feeds a later index
+ * rebuild). A failed persist is logged and the next announcement carries on; the
+ * question is not re-sent this session, only after a restart. The caller loads `projects` fresh each tick so questions parked since the
  * last tick are picked up. Idempotent: a record that already has a message id is never re-announced.
  */
 async function announcePending(projects: GatewayProject[], index: ReplyIndex, logger: Logger = hostLogger()): Promise<void> {
@@ -1092,7 +1093,8 @@ async function announcePending(projects: GatewayProject[], index: ReplyIndex, lo
       logger.log("gateway-announce-failed", { project: a.project, task: a.record.taskId });
       continue;
     }
-    setParkedMessageId(parkedDirOf(a.baseLocation), a.record.taskId, messageId);
+    // Route and guard first: the send has landed, so a persist that throws (an unwritable
+    // parked dir, a parked lock that gives up) must neither re-send it next tick nor abort the tick.
     recordSend(index, a.conn, messageId, {
       project: a.project,
       task: a.record.taskId,
@@ -1101,6 +1103,11 @@ async function announcePending(projects: GatewayProject[], index: ReplyIndex, lo
       parkedAt: a.record.parkedAt,
     });
     logger.log("gateway-announced", { project: a.project, task: a.record.taskId, messageId });
+    try {
+      setParkedMessageId(parkedDirOf(a.baseLocation), a.record.taskId, messageId);
+    } catch (e) {
+      logger.log("gateway-announce-persist-failed", { project: a.project, task: a.record.taskId, messageId, error: String(e) });
+    }
   }
 }
 

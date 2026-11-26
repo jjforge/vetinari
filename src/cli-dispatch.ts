@@ -51,7 +51,7 @@ import { formatBaseGateEstimate, makeReporter } from "./report.ts";
 import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
 import { PARK_REASON_FACTS, campaignParkHold, recoverySentence, type ParkHoldCampaign } from "./park-reasons.ts";
-import { mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
+import { mountParentPaths, mountParentProblems, usesHostSandbox, type readMountParentOwners } from "./sandbox.ts";
 import type { credentialsExposureWarning } from "./registry.ts";
 import { launch, reactToLiveCampaign } from "./launch.ts";
 
@@ -411,6 +411,8 @@ export interface DispatchDeps {
   /** The one-line warning naming a group/world-readable `.env` or `host.env` under the given base
    *  locations — what `campaign`/`redrive`/`run`/`answer`/`baseline` start prints (#563). */
   credentialsExposureWarning: typeof credentialsExposureWarning;
+  /** Is GNU `timeout` on this host's PATH? Every gate runs under it; the host sandbox's start checks (#492). */
+  hostHasTimeout: () => boolean;
 }
 
 /**
@@ -418,9 +420,26 @@ export interface DispatchDeps {
  * exposed-credentials warnings, then the mount-parent refusal.
  */
 function checkBeforeLaunch(deps: DispatchDeps): void {
+  warnIfUnsandboxed(deps);
   warnIfImageStale(deps);
   warnIfCredentialsExposed(deps);
   refuseIfMountParentsUnwritable(deps);
+}
+
+/**
+ * Say (stderr) that a host-sandbox project runs its agent and gates with no container (ADR 0028), and
+ * refuse when the host lacks the GNU `timeout` every gate runs under — macOS ships none, and without
+ * it every gate exits 127.
+ */
+function warnIfUnsandboxed(deps: DispatchDeps): void {
+  if (!usesHostSandbox(deps.cfg)) return;
+  deps.error(
+    "⚠ unsandboxed: the agent and gates run directly on this host, as your user, with your permissions and credentials, one issue at a time (ADR 0028)",
+  );
+  if (!deps.hostHasTimeout())
+    throw new Refusal(
+      "no `timeout` on PATH — every gate runs under GNU timeout, which macOS does not ship. Install GNU coreutils with `timeout` on PATH (nix: coreutils; Homebrew: `brew install coreutils` and add its gnubin dir to PATH)",
+    );
 }
 
 /**

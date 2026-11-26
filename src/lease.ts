@@ -58,6 +58,11 @@ export interface HostCeiling {
   configDir: string;
   ceiling: number;
   weight: number;
+  /**
+   * The most slots this project's campaign ever wants, whatever its wave size — `1` for the host
+   * sandbox (ADR 0028), whose agents share one set of simulators and caches. Absent: uncapped.
+   */
+  projectCap?: number;
 }
 
 /** The host-level directory the lease files live in, under the gateway config dir. */

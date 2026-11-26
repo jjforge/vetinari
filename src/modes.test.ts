@@ -64,6 +64,7 @@ import { defaultPruneDeps, runPrune } from "./prune.ts";
 import { reduceCampaign } from "./dashboard-model.ts";
 import { withEnv } from "./test-support.ts";
 import { Refusal } from "./refusal.ts";
+import { hostSandbox, makeSandbox } from "./sandbox.ts";
 
 const cfgWith = (fetchTask: ResolvedConfig["fetchTask"]): ResolvedConfig => ({ fetchTask }) as ResolvedConfig;
 
@@ -662,6 +663,29 @@ test("a one-ticket wave declares it wants exactly one slot — the reservation b
   await silenceConsole(() => campaign(cfg, [["101"]], host, "one", {}, gitFreeDeps(cfg, childRun)));
   // A single-ticket wave wants one slot, not its weight-derived cut of the ceiling.
   assert.equal(seen, 1);
+});
+
+test("a project capped at one slot (the host sandbox) runs its wave one child at a time and never wants more, however high the ceiling (#492)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-cap-"));
+  const cfg = harnessCfg(dir);
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 8, weight: 2, projectCap: 1 };
+  let running = 0;
+  let peak = 0;
+  const wants: (number | undefined)[] = [];
+  const childRun: CampaignDeps["spawnRun"] = async () => {
+    peak = Math.max(peak, ++running);
+    wants.push(readLeases(host.configDir).find((l) => l.project === cfg.project)?.want);
+    await new Promise((r) => setTimeout(r, 20));
+    running--;
+    return 0;
+  };
+  await silenceConsole(() => campaign(cfg, [["101", "102", "103"]], host, "cap", {}, gitFreeDeps(cfg, childRun)));
+  assert.equal(wants.length, 3, "every ticket ran");
+  assert.equal(peak, 1, "never two children at once");
+  assert.ok(
+    wants.every((w) => w === 1),
+    `declared want stays at the cap: ${wants}`,
+  );
 });
 
 test("the campaign lease spans the whole campaign — it is live during integration, at held 0 / want 0 between waves (#424)", async () => {
@@ -3642,3 +3666,32 @@ test("baseline removes a leftover worktree checked out on agent/baseline before 
   assert.equal(await baseline(cfg, deps), true);
   assert.deepEqual(atCreate, { branch: false, worktree: false });
 });
+
+for (const [outcome, gateExit] of [
+  ["green", 0],
+  ["red", 1],
+] as const) {
+  test(`baseline on hostSandbox() runs the toolchain probe and gates on the host, in a real worktree — ${outcome} (#492)`, async (t) => {
+    const { root, cfg } = staleBaselineRepo(t);
+    const hostCfg = {
+      ...cfg,
+      sandbox: hostSandbox(),
+      mounts: [],
+      toolchainProbe: "git --version",
+      gates: [{ cmd: `[ "$(git rev-parse --abbrev-ref HEAD)" = agent/baseline ] && exit ${gateExit}`, label: "host" }],
+    } as unknown as ResolvedConfig;
+    // Every gate runs under GNU `timeout`, which macOS lacks; a pass-through shim stands in for it.
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "timeout"), '#!/bin/sh\nshift\nexec "$@"\n', { mode: 0o755 });
+    const [cwd, path] = [process.cwd(), process.env.PATH];
+    process.chdir(root);
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      assert.equal(await silenceConsole(() => baseline(hostCfg, { root, makeSandbox })), gateExit === 0);
+    } finally {
+      process.chdir(cwd);
+      process.env.PATH = path;
+    }
+  });
+}

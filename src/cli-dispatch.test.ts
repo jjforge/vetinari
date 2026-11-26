@@ -12,6 +12,7 @@ import { buildStatus } from "./dashboard-status.ts";
 import { readEventLog } from "./event-log.ts";
 import { formatGatewayStatus } from "./gateway.ts";
 import { answerParked, listParked, writeParkedRecord, type ParkReason } from "./state.ts";
+import { hostSandbox } from "./sandbox.ts";
 
 // A spy that records each call's arguments and returns a canned value.
 function spy<T>(ret?: T) {
@@ -98,6 +99,7 @@ function makeDeps(overrides: Partial<DispatchDeps> = {}) {
     readImageFreshness: spy({}) as unknown as DispatchDeps["readImageFreshness"],
     readMountParentOwners: spy(undefined) as unknown as DispatchDeps["readMountParentOwners"],
     credentialsExposureWarning: spy(undefined) as unknown as DispatchDeps["credentialsExposureWarning"],
+    hostHasTimeout: spy(true) as unknown as DispatchDeps["hostHasTimeout"],
     ...overrides,
   };
   return { deps, logged, errored, exitCodes, cfg };
@@ -2470,6 +2472,51 @@ for (const [name, cmd] of startCommands) {
     assert.ok(!errored.some((e) => /vetinari build/.test(e)), errored.join("\n"));
   });
 }
+
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} with hostSandbox() says once that it runs unsandboxed, citing ADR 0028; Docker says nothing (#492)`, async () => {
+    const opts = { expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"] };
+    const host = makeDeps({ ...opts, cfg: { ...makeDeps().deps.cfg, sandbox: hostSandbox() } as unknown as DispatchDeps["cfg"] });
+    await dispatch(cmd, host.deps);
+    const warnings = host.errored.filter((e) => /unsandboxed/.test(e));
+    assert.equal(warnings.length, 1, host.errored.join("\n"));
+    assert.match(warnings[0], /ADR 0028/);
+    const dockerRun = makeDeps(opts);
+    await dispatch(cmd, dockerRun.deps);
+    assert.ok(!dockerRun.errored.some((e) => /unsandboxed/.test(e)), dockerRun.errored.join("\n"));
+  });
+}
+
+for (const [name, cmd] of startCommands) {
+  test(`dispatch ${name} with hostSandbox() refuses when the host has no GNU timeout, naming coreutils; Docker never checks (#492)`, async () => {
+    const opts = { expandSelection: spy(Promise.resolve(["101"])) as unknown as DispatchDeps["expandSelection"] };
+    const noTimeout = spy(false);
+    const host = makeDeps({
+      ...opts,
+      hostHasTimeout: noTimeout as unknown as DispatchDeps["hostHasTimeout"],
+      cfg: { ...makeDeps().deps.cfg, sandbox: hostSandbox() } as unknown as DispatchDeps["cfg"],
+    });
+    await assert.rejects(
+      dispatch(cmd, host.deps),
+      (err: Error) => err instanceof Refusal && /timeout/.test(err.message) && /coreutils/.test(err.message),
+    );
+    assert.equal((host.deps.runLoop as unknown as { calls: unknown[] }).calls.length, 0);
+    assert.equal((host.deps.campaign as unknown as { calls: unknown[] }).calls.length, 0);
+    assert.equal((host.deps.baseline as unknown as { calls: unknown[] }).calls.length, 0);
+    const dockerProbe = spy(false);
+    await dispatch(cmd, makeDeps({ ...opts, hostHasTimeout: dockerProbe as unknown as DispatchDeps["hostHasTimeout"] }).deps);
+    assert.deepEqual(dockerProbe.calls, []);
+  });
+}
+
+test("a campaign child `run` on hostSandbox() never repeats the unsandboxed warning — the campaign printed it once (#492)", async () => {
+  const { deps, errored } = makeDeps({
+    isCampaignChild: true,
+    cfg: { ...makeDeps().deps.cfg, sandbox: hostSandbox() } as unknown as DispatchDeps["cfg"],
+  });
+  await dispatch(parseArgs(["run", "101"]), deps);
+  assert.ok(!errored.some((e) => /unsandboxed/.test(e)), errored.join("\n"));
+});
 
 test("dispatch run proceeds silently when every mount parent is agent-owned in the image, probing each once (#512)", async () => {
   const probe = spy(

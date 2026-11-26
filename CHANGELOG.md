@@ -20,6 +20,12 @@ and each entry opens with a tag saying who it reaches:
 `**Breaking changes:**` sorts first in a milestone and names the contract it broke.
 Within a milestone each bold section label appears at most once.
 
+### Collected changes — November 26, 2026
+
+**Improvements:**
+- [ops] `sandbox: hostSandbox()` runs a project's agent and gates directly on the host, unsandboxed, for toolchains only macOS has (Xcode, `xcrun`, the iOS simulator). Every start prints an `⚠ unsandboxed` line and refuses when GNU `timeout` is not on PATH, and its campaigns run one issue at a time (ADR 0028) (#492).
+- [api] `hostSandbox` is exported from `vetinari`, and a host-sandbox run's `sandbox` event row carries `sandbox: "host"` (#492).
+
 ### Collected changes — November 2, 2026
 
 **Breaking changes:**

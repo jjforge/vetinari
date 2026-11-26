@@ -1,4 +1,5 @@
 #!/usr/bin/env -S npx tsx
+import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { existsSync, mkdirSync, readFileSync, watch } from "node:fs";
 import { homedir } from "node:os";
@@ -19,7 +20,7 @@ import { decodeChildStart, isCampaignChildRun, readAgentOverride, stampAgentOver
 import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
-import { readMountParentOwners } from "./sandbox.ts";
+import { readMountParentOwners, usesHostSandbox } from "./sandbox.ts";
 import { baseline, build, campaign, readImageFreshness, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
@@ -577,11 +578,12 @@ autoRegister(cfg, projectRoot, hostLog);
 // MAX_CONCURRENT_CONTAINERS (or the max-concurrent-containers file) when set, else
 // a machine-derived default. Every queue/campaign carries it and this project's
 // containerShare-derived weight into the cooperative filesystem lease; there is no
-// per-run cap.
+// per-run cap. A host-sandbox project runs one issue at a time (ADR 0028).
 const hostBudget: HostCeiling = {
   configDir: gatewayConfigDir(),
   ceiling: resolveHostCeiling(gatewayConfigDir()),
   weight: containerShareWeight(cfg.containerShare),
+  ...(usesHostSandbox(cfg) ? { projectCap: 1 } : {}),
 };
 
 // Move the live log aside to a timestamped archive and reset it, so the dashboard and
@@ -705,4 +707,5 @@ await dispatch(parseArgs([mode, ...rest]), {
   readImageFreshness,
   readMountParentOwners,
   credentialsExposureWarning,
+  hostHasTimeout: () => spawnSync("sh", ["-c", "command -v timeout"], { stdio: "ignore" }).status === 0,
 });

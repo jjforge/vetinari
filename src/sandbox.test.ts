@@ -9,15 +9,20 @@ import {
   agentFor,
   ensureMountSources,
   foreignWorktreeFor,
+  hostSandbox,
+  makeSandbox,
   makeSandboxOptions,
   mountParentProblems,
   parseForeignWorktree,
   parseStatOwners,
   readMountParentOwners,
   sandboxMounts,
+  usesHostSandbox,
 } from "./sandbox.ts";
+import { hostSandbox as indexHostSandbox } from "./index.ts";
 import type { MountSpec, ResolvedConfig } from "./config.ts";
 import type { SandboxProvider } from "@ai-hero/sandcastle";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { withEnv } from "./test-support.ts";
 
 // agentFor only reads `cfg.agent` and the VETINARI_AGENT env var — a bare object
@@ -174,6 +179,54 @@ test("a configured sandbox factory builds the provider, given the config and thi
     assert.deepEqual(calls[1][1], { mounts: sandboxMounts(cfg, process.cwd()) });
     assert.ok(!calls[1][1].mounts.some((m) => m.sandboxPath === "/home/agent/.copilot"));
   });
+});
+
+test("hostSandbox() builds sandcastle's noSandbox provider, and usesHostSandbox recognises it however it was written (#492)", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "vetinari-state-"));
+  assert.equal(makeSandboxOptions(sandboxCfg({ stateDir, sandbox: hostSandbox() }), "436").sandbox.name, "no-sandbox");
+  assert.equal(usesHostSandbox(sandboxCfg({ sandbox: hostSandbox() })), true);
+  assert.equal(usesHostSandbox(sandboxCfg({ sandbox: () => noSandbox() })), true);
+  assert.equal(usesHostSandbox(sandboxCfg()), false);
+  const fake = () => ({ name: "fake", env: {} }) as unknown as SandboxProvider;
+  assert.equal(usesHostSandbox(sandboxCfg({ sandbox: fake })), false);
+  assert.equal(indexHostSandbox, hostSandbox);
+});
+
+test("with hostSandbox(), each run gets its own worktree and branch on the host, .env is injected, and the sandbox row says host (#492)", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "vetinari-host-")));
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "main");
+  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+  mkdirSync(join(root, ".vetinari.local"));
+  writeFileSync(join(root, ".vetinari.local", ".env"), "PROBE_KEY=probe-value\n");
+  const rows: [string, Record<string, unknown>][] = [];
+  const cfg = sandboxCfg({
+    sandbox: hostSandbox(),
+    log: { log: (kind: string, data: Record<string, unknown>) => rows.push([kind, data]) },
+  } as never);
+  const cwd = process.cwd();
+  process.chdir(root);
+  try {
+    const sandboxes = [await makeSandbox(cfg, "1"), await makeSandbox(cfg, "2")];
+    try {
+      const pwds: string[] = [];
+      for (const [i, sbx] of sandboxes.entries()) {
+        const pwd = (await sbx.exec("pwd")).stdout.trim();
+        assert.ok(pwd.startsWith(join(root, ".vetinari.local", "worktrees") + "/"), pwd);
+        pwds.push(pwd);
+        assert.equal((await sbx.exec("git rev-parse --abbrev-ref HEAD")).stdout.trim(), `agent/${i + 1}`);
+        assert.equal((await sbx.exec('printf %s "$PROBE_KEY"')).stdout, "probe-value");
+      }
+      assert.notEqual(pwds[0], pwds[1]);
+    } finally {
+      for (const sbx of sandboxes) await sbx.close();
+    }
+  } finally {
+    process.chdir(cwd);
+  }
+  const sandboxRows = rows.filter(([kind]) => kind === "sandbox").map(([, data]) => data);
+  assert.equal(sandboxRows.length, 2);
+  for (const row of sandboxRows) assert.equal(row.sandbox, "host");
 });
 
 test("sandboxMounts appends the host worktrees dir, read-only at its own host path, so an in-container prune sees live worktrees", () => {

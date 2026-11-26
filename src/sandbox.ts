@@ -11,6 +11,7 @@ import type {
   PiOptions,
 } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
@@ -111,7 +112,12 @@ export async function makeSandbox(cfg: ResolvedConfig, taskId: string, { agentRu
       `${branch} is already checked out at ${foreign} — remove that worktree before running this issue (one run per issue).`,
     );
 
-  cfg.log.log("sandbox", { taskId, branch, mounts: sandboxMounts(cfg, process.cwd(), agentTaskId).map((m) => m.hostPath) });
+  cfg.log.log("sandbox", {
+    taskId,
+    branch,
+    mounts: sandboxMounts(cfg, process.cwd(), agentTaskId).map((m) => m.hostPath),
+    ...(usesHostSandbox(cfg) ? { sandbox: "host" } : {}),
+  });
 
   return sandcastle.createSandbox(makeSandboxOptions(cfg, taskId, agentTaskId));
 }
@@ -145,6 +151,16 @@ function sandboxProvider(cfg: ResolvedConfig, mounts: MountSpec[]): sandcastle.S
   if (!cfg.image) throw new Refusal(`no "image" configured — the Docker sandbox needs one (or set "sandbox")`);
   return docker({ imageName: cfg.image, mounts });
 }
+
+/**
+ * The host sandbox (ADR 0028): a `sandbox` factory for sandcastle's `noSandbox()`, so the agent and
+ * gates run directly on the host in the run's own worktree — for toolchains only macOS has (Xcode).
+ * Opt-in only: nothing selects it but `sandbox: hostSandbox()` in the config, never a fallback.
+ */
+export const hostSandbox = (): NonNullable<ResolvedConfig["sandbox"]> => () => noSandbox();
+
+/** Does this config run on the host? True for `hostSandbox()` and for a hand-written `() => noSandbox()`. */
+export const usesHostSandbox = (cfg: ResolvedConfig): boolean => cfg.sandbox?.(cfg, { mounts: [] }).name === "no-sandbox";
 
 /**
  * The bind mounts for this run's container: `cfg.mounts`, then the host worktrees dir

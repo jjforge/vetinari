@@ -287,8 +287,14 @@ _Avoid_: state dir, work dir, `.sandcastle/`.
 **Container gate** (`.env`):
 The one file in [[vetinari-local]] that crosses into the [[agent]] container —
 only the agent provider's credential. A secret the agent must not see never goes
-here.
+here. Under the [[host-sandbox]] nothing is withheld: the agent sees the whole host.
 _Avoid_: container boundary, sandbox env, container config.
+
+**Host sandbox** (`hostSandbox()`):
+The opt-in `sandbox` provider that runs an [[issue]]'s [[agent]] and [[gate]]s
+directly on the host, in its own worktree, with no container — for toolchains only
+macOS has. Its [[campaign]]s run one issue at a time.
+_Avoid_: local sandbox (the test-only adapter), no-sandbox, native mode.
 
 **`host.env`**:
 The project's host-only secrets the container must never get — its Telegram bot

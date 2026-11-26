@@ -95,7 +95,7 @@ exported for custom wiring.
 | --- | --- |
 | `project` | this project's name in the host registry, dashboard, and notices |
 | `image` | the agent image name — built from `vetinari/Dockerfile`, used by `build`/`baseline`/`run`/`campaign` alike. Required unless `sandbox` is set |
-| `sandbox` | optional factory `(cfg, { mounts }) => SandboxProvider` building the sandcastle sandbox provider every agent turn, gate, `baseline` and integration gate runs in; `mounts` are this run's bind mounts (`mounts`, the worktrees dir, and a copilot agent run's Copilot directory). Default: the Docker provider for `image` with those mounts. With it set, `image` is optional, `build` refuses (there is no image to build), and the stale-image and mount-parent checks at `campaign`/`redrive`/`run`/`answer`/`baseline` start are skipped. The host slot (`containerShare`, the host container ceiling) applies unchanged |
+| `sandbox` | optional factory `(cfg, { mounts }) => SandboxProvider` building the sandcastle sandbox provider every agent turn, gate, `baseline` and integration gate runs in; `mounts` are this run's bind mounts (`mounts`, the worktrees dir, and a copilot agent run's Copilot directory). Default: the Docker provider for `image` with those mounts. With it set, `image` is optional, `build` refuses (there is no image to build), and the stale-image and mount-parent checks at `campaign`/`redrive`/`run`/`answer`/`baseline` start are skipped. The host slot (`containerShare`, the host container ceiling) applies unchanged. `hostSandbox()` (exported from `vetinari`) is the shipped alternative for toolchains only macOS has: it runs the agent and gates directly on the host in each run's worktree, unsandboxed (ADR 0028). Every start says so on stderr, refuses when GNU `timeout` is not on PATH, and its campaigns run one issue at a time |
 | `baseBranch` | the branch merges land on (the base a campaign advances) |
 | `gates` | the test commands that decide green; `{ cmd, label?, when?, budgetSeconds?, timeoutSeconds?, perMerge? }` — `when` scopes a gate to branches that touched matching files; `timeoutSeconds` (default 3600) is how long the gate may run: past it the gate is red and its report says it timed out — gates run under the image's `timeout` (GNU coreutils, present in the shipped `node:22-bookworm` base), so the image must provide it; `budgetSeconds` is how long the gate should take, and a run over it (green or red) is flagged as a [slow gate](user-guide.md#where-you-see-things) — information only, never a verdict; `perMerge: true` also runs the gate on the base after each wave member's merge, and a red result undoes only that member's merge and retries it once like a merge conflict (then parks it `conflict`) instead of parking the whole wave `red-base` — flag a fast check, such as a typecheck or lint that compiles the tests (design §6) |
 | `setup` | commands run once per sandbox, before the agent starts (e.g. `npm ci`) |
@@ -227,7 +227,8 @@ The event log (`logs/orchestrator.jsonl`) is one JSON object per line,
 
 Diagnostic rows — `gate`, `gate-check`, `gate-result`, `commit`, `tool`, `sandbox-exec`,
 sandbox setup, hook failures — are activity, not state: the reducer ignores them;
-the issue sheet and live tail read them.
+the issue sheet and live tail read them. A `sandbox` row (`taskId`, `branch`, `mounts`) also
+carries `sandbox: "host"` when the run is on the host sandbox (ADR 0028).
 Among them, `finding-redacted` (`taskId`, `summary` — already scrubbed — and `redactions`, a count per
 env key or token kind) records that a harvested finding was scrubbed of secrets before triage; it
 never carries the matched text.

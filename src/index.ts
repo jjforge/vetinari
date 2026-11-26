@@ -3,7 +3,7 @@ export type { VetinariConfig, ResolvedConfig, GateSpec, MountSpec, Destination, 
 export { runLoop, answerPromptFor, DONE, BLOCKED } from "./loop.ts";
 export type { Outcome, ResumeEntry } from "./loop.ts";
 export { runGates } from "./gate.ts";
-export { makeSandbox, agentFor } from "./sandbox.ts";
+export { makeSandbox, agentFor, hostSandbox } from "./sandbox.ts";
 export { baseline, campaign, queue, tgTest } from "./modes.ts";
 export {
   gateway,

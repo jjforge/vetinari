@@ -121,6 +121,15 @@ For a team whose only agent is GitHub Copilot. The shipped image installs the Co
   agent: { provider: "copilot" },
   ```
 
+## Running a macOS-only toolchain
+
+For a project whose toolchain exists only on macOS (Xcode, `xcrun`, the iOS simulator), which no Linux container can run. Set `sandbox: hostSandbox()` (imported from `"vetinari"`) in `vetinari/config.mts` and drop `image`: the agent and gates then run directly on your Mac, in each issue's own worktree, with no container (ADR 0028).
+
+- **No image.** `build` refuses, so prove the gates with `vetinari baseline`.
+- **GNU `timeout`.** Every gate runs under it and macOS ships none, so a start refuses until it is on PATH: install GNU coreutils (nix: `coreutils`; Homebrew: `brew install coreutils`, then add its `gnubin` directory to PATH).
+- **Unsandboxed, and it says so.** Every start prints an `⚠ unsandboxed` line. The agent runs as you, with your files, your whole environment, your `gh` and ssh logins, and no permission prompts. Only point it at issues you would let a script with your login act on.
+- **One issue at a time.** A campaign runs its issues one after another, because host agents share one set of simulators, DerivedData and caches. Other projects on the machine keep their slots.
+
 ## Writing an issue that can run unattended
 
 - Label it `ready-for-agent` only when the body is the whole spec: what to build, how you will know it is done, the edge cases.

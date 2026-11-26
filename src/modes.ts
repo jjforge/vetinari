@@ -501,7 +501,10 @@ export async function queue(
   // campaign-liveness lease itself is registered for the whole campaign by `campaign`
   // (#424); this refreshes its demand to the wave's size and drops it back to zero in
   // the `finally`, so the lease lives on between waves at zero demand (no slot floor).
-  registerProject(host.configDir, cfg.project, host.weight, "campaign", pending.length);
+  // A `projectCap` (the host sandbox's one-at-a-time, ADR 0028) bounds that demand, and the fair
+  // share never grants a project more than it wants, so the cap is also the most it ever holds.
+  const demand = (n: number) => Math.min(n, host.projectCap ?? Infinity);
+  registerProject(host.configDir, cfg.project, host.weight, "campaign", demand(pending.length));
   try {
     await new Promise<void>((done, fail) => {
       let poll: ReturnType<typeof setInterval> | undefined;
@@ -535,7 +538,7 @@ export async function queue(
         // reserves slots against work it no longer has (#387). Runs after `readmit`
         // so a re-admitted member counts, and before `acquireSlot` so the share this
         // spawn round sees is current.
-        registerProject(host.configDir, cfg.project, host.weight, "campaign", running + pending.length);
+        registerProject(host.configDir, cfg.project, host.weight, "campaign", demand(running + pending.length));
         // No per-run cap: spawn as long as work remains and the cooperative lease
         // grants a slot — the fair share (and the ceiling) is the only bound.
         while (pending.length && acquireSlot(host.configDir, host.ceiling, cfg.project, host.weight)) {

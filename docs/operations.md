@@ -363,8 +363,10 @@ host-sandbox agents and gates need your tools (`claude`, `git`, `gh`, GNU `timeo
 `xcodebuild`). It also carries any of `VETINARI_STATUS_ALLOWED_HOSTS`,
 `VETINARI_GATEWAY_STATUS_HOST`, `VETINARI_GATEWAY_STATUS_PORT` and
 `MAX_CONCURRENT_CONTAINERS` set when you run it. These are pinned, so **re-run `gateway
-install` and then `gateway restart`** after a node or tsx upgrade, or to change any of
-them.
+install`, then `gateway stop` and `gateway start`**, after a node or tsx upgrade or to
+change any of them. `gateway restart` is not enough here: it reruns the plist launchd
+loaded at `start`, so a rewritten file takes effect only once the agent is unloaded and
+loaded again.
 
 The verbs wrap `launchctl` in your GUI domain: `start` is `bootstrap`, `stop` is
 `bootout` (which unloads the agent until the next `gateway start` or login), `restart`

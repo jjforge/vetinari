@@ -348,8 +348,9 @@ if (mode === "gateway") {
       console.log(
         `Wrote ${path}. It starts at every login; start it now with:\n` +
           `  vetinari gateway start\n` +
-          `Re-run \`vetinari gateway install\` (then \`vetinari gateway restart\`) after a node or tsx upgrade, or to\n` +
-          `pick up a changed PATH or VETINARI_STATUS_ALLOWED_HOSTS — the agent pins the values this shell had.`,
+          `If it was already running, load the new file with \`vetinari gateway stop && vetinari gateway start\` —\n` +
+          `\`restart\` reruns the plist launchd already loaded. Re-run \`vetinari gateway install\` after a node or tsx\n` +
+          `upgrade, or to pick up a changed PATH or VETINARI_STATUS_ALLOWED_HOSTS — the agent pins the values this shell had.`,
       );
     }
     process.exit(0);

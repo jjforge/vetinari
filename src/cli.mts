@@ -36,7 +36,7 @@ import {
   type TidyTarget,
 } from "./merge.ts";
 import { gateway } from "./gateway.ts";
-import { defaultGatewayServiceIO, gatewayServiceUnsupported, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
+import { defaultGatewayServiceIO, hostServiceManager, isGatewayServiceVerb, runGatewayService } from "./gateway-service.ts";
 import { runPrune } from "./prune.ts";
 import { expandSelection, makeAskUnderspecified, runCampaignPlan, runFilesetCheck } from "./plan.ts";
 import { runGraft } from "./graft.ts";
@@ -47,6 +47,8 @@ import {
   applyLayoutMigration,
   computeLayoutMigration,
   describeMigration,
+  launchAgentPath,
+  resolvedGatewayLaunchAgent,
   resolvedGatewayUnit,
   scanLayout,
   systemdUnitPath,
@@ -331,10 +333,27 @@ if (mode === "install") {
 // registry, so it must run BEFORE the strict cwd config load (which the gateway's
 // own directory need not satisfy).
 if (mode === "gateway") {
-  // macOS has no systemd: refuse install and the lifecycle verbs before resolving a
-  // unit path or spawning systemctl. Bare `gateway` (the foreground daemon) still runs.
-  const unsupported = gatewayServiceUnsupported(process.platform, rest);
-  if (unsupported) throw new Refusal(unsupported);
+  // `gateway install` writes THIS host's resolved service — on macOS a launchd
+  // LaunchAgent plist, carrying this shell's PATH and gateway settings (launchd starts
+  // agents with a bare system PATH); elsewhere the systemd unit below.
+  if (rest[0] === "install" && process.platform === "darwin") {
+    const dryRun = rest.includes("--dry-run");
+    const path = launchAgentPath();
+    const content = resolvedGatewayLaunchAgent();
+    console.log(`vetinari gateway install → ${path}\n\n${content}`);
+    if (dryRun) {
+      console.log("(dry run — nothing was written)");
+    } else {
+      writeGatewayUnit(path, content);
+      console.log(
+        `Wrote ${path}. It starts at every login; start it now with:\n` +
+          `  vetinari gateway start\n` +
+          `Re-run \`vetinari gateway install\` (then \`vetinari gateway restart\`) after a node or tsx upgrade, or to\n` +
+          `pick up a changed PATH or VETINARI_STATUS_ALLOWED_HOSTS — the agent pins the values this shell had.`,
+      );
+    }
+    process.exit(0);
+  }
   // `gateway install` writes THIS host's resolved unit — a fully absolute node +
   // tsx-loader + cli invocation — to systemdUnitPath(). The unit can't be a static
   // committed file: the per-host absolute launch chain (and the crash-loop it fixes,
@@ -359,12 +378,14 @@ if (mode === "gateway") {
     process.exit(0);
   }
   // Service lifecycle: `status|start|stop|restart` wrap `systemctl --user <verb>
-  // vetinari-gateway` (the user unit `gateway install` writes), propagating its
+  // vetinari-gateway` (the user unit `gateway install` writes), or launchctl against
+  // the LaunchAgent on macOS, propagating its
   // exit code so scripts can rely on it. Any other first token — including none —
   // falls through to running the daemon in the FOREGROUND, which is what the
   // systemd unit's ExecStart invokes; that path must stay unchanged.
   if (isGatewayServiceVerb(rest[0])) {
-    process.exit(await runGatewayService(rest[0], defaultGatewayServiceIO()));
+    const manager = hostServiceManager();
+    process.exit(await runGatewayService(rest[0], defaultGatewayServiceIO(manager), manager));
   }
   await gateway();
   process.exit(0);

@@ -7,6 +7,8 @@ import {
   applyLayoutMigration,
   computeLayoutMigration,
   describeMigration,
+  gatewayLaunchAgent,
+  gatewayLaunchAgentEnv,
   resolveGatewayExecStart,
   resolvedGatewayUnit,
   scanLayout,
@@ -313,4 +315,36 @@ test("describeMigration leads with the conflicts when the plan is refused", () =
   );
   assert.match(text, /refus|conflict/i);
   assert.match(text, /\.vetinari\.local\/logs/);
+});
+
+test("gatewayLaunchAgent runs the absolute gateway argv at login, keeps it alive, and leaves launched campaigns running", () => {
+  const plist = gatewayLaunchAgent(
+    { execPath: "/n/node", execArgv: ["--import", "file:///t/loader.mjs"], argv1: "/v/src/cli.mts" },
+    { PATH: "/a/bin:/b/bin", VETINARI_STATUS_ALLOWED_HOSTS: "mac & co.ts.net" },
+    "/Users/u/Library/Logs/vetinari-gateway.log",
+  );
+  assert.match(plist, /<key>Label<\/key>\s*<string>vetinari-gateway<\/string>/);
+  const args = [...plist.matchAll(/<string>([^<]*)<\/string>/g)].map((m) => m[1]);
+  const start = args.indexOf("/n/node");
+  assert.deepEqual(args.slice(start, start + 5), ["/n/node", "--import", "file:///t/loader.mjs", "/v/src/cli.mts", "gateway"]);
+  for (const key of ["RunAtLoad", "KeepAlive", "AbandonProcessGroup"]) assert.match(plist, new RegExp(`<key>${key}</key>\\s*<true/>`));
+  assert.match(plist, /<key>PATH<\/key>\s*<string>\/a\/bin:\/b\/bin<\/string>/);
+  // Values are XML-escaped.
+  assert.match(plist, /<string>mac &amp; co\.ts\.net<\/string>/);
+  assert.match(plist, /<key>StandardOutPath<\/key>\s*<string>\/Users\/u\/Library\/Logs\/vetinari-gateway\.log<\/string>/);
+  assert.match(plist, /<key>StandardErrorPath<\/key>\s*<string>\/Users\/u\/Library\/Logs\/vetinari-gateway\.log<\/string>/);
+  assert.ok(plist.startsWith("<?xml"), "a plist document");
+});
+
+test("gatewayLaunchAgentEnv carries PATH and only the set gateway-facing VETINARI_/ceiling variables", () => {
+  assert.deepEqual(
+    gatewayLaunchAgentEnv({
+      PATH: "/p",
+      HOME: "/h",
+      VETINARI_STATUS_ALLOWED_HOSTS: "m.ts.net",
+      MAX_CONCURRENT_CONTAINERS: "3",
+      OTHER: "x",
+    }),
+    { PATH: "/p", VETINARI_STATUS_ALLOWED_HOSTS: "m.ts.net", MAX_CONCURRENT_CONTAINERS: "3" },
+  );
 });

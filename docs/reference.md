@@ -67,8 +67,8 @@ config, but left to the mode's own arguments like any other token.
 `--help`, `-h` and `help` print the usage text on **stdout** and exit `0` — help is
 not a refusal. An unknown mode prints the usage text on **stderr** and exits `4`.
 
-**Exception:** `gateway status|start|stop|restart` pass `systemctl`'s own exit code
-straight through (which can be `3`) (on Linux; on macOS they refuse with exit 4), so those verbs do not follow this table — which is
+**Exception:** `gateway status|start|stop|restart` pass the service manager's own exit code
+straight through: `systemctl`'s on Linux (which can be `3`), `launchctl`'s on macOS. So those verbs do not follow this table — which is
 why a refusal is `4` and not `3`.
 
 ## Configuration fields

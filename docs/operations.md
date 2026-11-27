@@ -534,6 +534,8 @@ systemctl --user edit vetinari-gateway
 vetinari gateway restart
 ```
 
+On macOS the LaunchAgent pins the environment it was installed with. Export the variables in your shell, re-run `vetinari gateway install`, then `vetinari gateway stop && vetinari gateway start`.
+
 ### Behind a reverse proxy
 
 A reverse proxy that authenticates you is the other supported path. It must
@@ -675,7 +677,8 @@ or tsx upgrade.
 When an upgrade changes the unit vetinari writes (as when it gained
 `KillMode=process`), re-run `vetinari gateway install` and
 `systemctl --user daemon-reload` before `vetinari gateway restart`, or the running
-service keeps the old unit.
+service keeps the old unit. On macOS, re-run `vetinari gateway install` and then
+`vetinari gateway stop && vetinari gateway start`: `restart` keeps the old plist.
 
 If a campaign exists in any project, read
 [During a campaign, and rolling back](#during-a-campaign-and-rolling-back) first.

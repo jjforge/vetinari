@@ -1,0 +1,7 @@
+# Accepted failing [auto] criteria (id, then the issue tracking it). review.sh exits
+# non-zero on a fail not listed here, or on a listed id that now passes: remove it then.
+3.4 #743
+3.5 #743
+5.2 #752
+6.3 #745
+7.1 #758

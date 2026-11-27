@@ -23,6 +23,7 @@ Within a milestone each bold section label appears at most once.
 ### Collected changes — November 27, 2026
 
 **Improvements:**
+- [user] A new operator skill, `/score-repo`, scores a repo against the review rubric pinned in it, records the round in the rubric's score history, and files what it finds. vetinari's own rubric is `docs/review-rubric.md`, and its automated checks are `scripts/review.sh`. The script's exit code fails only on a regression against `scripts/review-baseline.txt` (#746).
 - [ops] `hostSandbox({ parallel: n })` lets a host-sandbox project's campaign run up to n issues at once (default one). The `⚠ unsandboxed` start line names the number, and the user guide gains a recipe for giving each run its own simulator and DerivedData, with a cleanup command and sizing guidance (ADR 0028) (#742).
 - [ops] On macOS, `vetinari gateway install` now writes a launchd LaunchAgent (`~/Library/LaunchAgents/vetinari-gateway.plist`) that starts the gateway at login and keeps it running, carrying the installing shell's PATH and gateway settings. `gateway status|start|stop|restart` drive it through `launchctl`, and it logs to `~/Library/Logs/vetinari-gateway.log`. These commands used to refuse on macOS (#744).
 

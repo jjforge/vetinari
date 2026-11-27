@@ -128,7 +128,32 @@ For a project whose toolchain exists only on macOS (Xcode, `xcrun`, the iOS simu
 - **No image.** `build` refuses, so prove the gates with `vetinari baseline`.
 - **GNU `timeout`.** Every gate runs under it and macOS ships none, so a start refuses until it is on PATH: install GNU coreutils (nix: `coreutils`; Homebrew: `brew install coreutils`, then add its `gnubin` directory to PATH).
 - **Unsandboxed, and it says so.** Every start prints an `⚠ unsandboxed` line. The agent runs as you, with your files, your whole environment, your `gh` and ssh logins, and no permission prompts. Only point it at issues you would let a script with your login act on.
-- **One issue at a time.** A campaign runs its issues one after another, because host agents share one set of simulators, DerivedData and caches. Other projects on the machine keep their slots.
+- **One issue at a time, unless each run has its own simulator.** By default a campaign runs its issues one after another, because host agents share the Mac's simulators, DerivedData and caches. Other projects on the machine keep their slots.
+
+### Running issues in parallel, each on its own simulator
+
+`hostSandbox({ parallel: 2 })` lets a campaign run two issues at once. Only raise it once every run tests on its own simulator, with its own DerivedData, because the agent runs the tests itself during its turns, not just the gate. Route both through one script the gate calls and the agent is told to use, for example `scripts/test.sh`:
+
+```sh
+#!/bin/sh
+# One simulator and one DerivedData per worktree, so parallel vetinari runs never collide.
+set -eu
+sim="myapp-$(basename "$PWD")"
+xcrun simctl list devices | grep -q "$sim (" || xcrun simctl create "$sim" "iPad Pro 13-inch (M5)" >/dev/null
+exec xcodebuild test -project MyApp.xcodeproj -scheme MyAppTests \
+  -destination "platform=iOS Simulator,name=$sim" -derivedDataPath .build/DerivedData -quiet
+```
+
+Set the gate to `{ cmd: "scripts/test.sh" }`, and tell the agent in the project's `CLAUDE.md` to run the tests only through it. Each worktree is a separate checkout cut from the base, so commit the script and that line to the base branch before a campaign. The script uses a name like `myapp-agent-42` for one issue's simulator and `myapp-baseline` for `baseline`'s.
+
+**How many.** The limit is CPU cores, not memory. On an M6 Mac mini (2 performance cores, 24 GB) two at once gave 1.5× the throughput of one, and three were slower per run and failed timing-sensitive tests under load. Measure yours by running the script in two or three worktrees at once.
+
+**Cleanup.** Simulators outlive their worktrees. Delete the ones whose worktree is gone, from the project's root:
+
+```sh
+xcrun simctl list devices | sed -n 's/^ *\(myapp-[^ ]*\) (\([0-9A-F-]*\)).*/\1 \2/p' |
+  while read -r name udid; do [ -d ".vetinari.local/worktrees/${name#myapp-}" ] || xcrun simctl delete "$udid"; done
+```
 
 ## Writing an issue that can run unattended
 

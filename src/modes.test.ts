@@ -688,6 +688,22 @@ test("a project capped at one slot (the host sandbox) runs its wave one child at
   );
 });
 
+test("a project capped at two slots (hostSandbox({ parallel: 2 })) runs two children at once, never three (#742)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "vetinari-cap2-"));
+  const cfg = harnessCfg(dir);
+  const host: HostCeiling = { configDir: join(dir, "host"), ceiling: 8, weight: 2, projectCap: 2 };
+  let running = 0;
+  let peak = 0;
+  const childRun: CampaignDeps["spawnRun"] = async () => {
+    peak = Math.max(peak, ++running);
+    await new Promise((r) => setTimeout(r, 20));
+    running--;
+    return 0;
+  };
+  await silenceConsole(() => campaign(cfg, [["101", "102", "103", "104"]], host, "cap2", {}, gitFreeDeps(cfg, childRun)));
+  assert.equal(peak, 2);
+});
+
 test("the campaign lease spans the whole campaign — it is live during integration, at held 0 / want 0 between waves (#424)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "vetinari-lease-life-"));
   const cfg = harnessCfg(dir);

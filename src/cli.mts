@@ -20,7 +20,7 @@ import { decodeChildStart, isCampaignChildRun, readAgentOverride, stampAgentOver
 import { applyCollect, describeFragmentNearMisses, formatMilestoneDate, FRAGMENT_DIR } from "./changelog.ts";
 import { hostLogger, hostLogTarget, readHostLog, readHostLogLines, renderHostEvent } from "./log.ts";
 import { runLoop } from "./loop.ts";
-import { readMountParentOwners, usesHostSandbox } from "./sandbox.ts";
+import { hostParallel, readMountParentOwners } from "./sandbox.ts";
 import { baseline, build, campaign, readImageFreshness, requireTelegram, tgTest } from "./modes.ts";
 import { runTgConnect } from "./tg-connect.ts";
 import { tgSend } from "./telegram.ts";
@@ -578,12 +578,12 @@ autoRegister(cfg, projectRoot, hostLog);
 // MAX_CONCURRENT_CONTAINERS (or the max-concurrent-containers file) when set, else
 // a machine-derived default. Every queue/campaign carries it and this project's
 // containerShare-derived weight into the cooperative filesystem lease; there is no
-// per-run cap. A host-sandbox project runs one issue at a time (ADR 0028).
+// per-run cap. A host-sandbox project runs `hostSandbox({ parallel })` issues at a time, default one (ADR 0028).
 const hostBudget: HostCeiling = {
   configDir: gatewayConfigDir(),
   ceiling: resolveHostCeiling(gatewayConfigDir()),
   weight: containerShareWeight(cfg.containerShare),
-  ...(usesHostSandbox(cfg) ? { projectCap: 1 } : {}),
+  ...(hostParallel(cfg) ? { projectCap: hostParallel(cfg) } : {}),
 };
 
 // Move the live log aside to a timestamped archive and reset it, so the dashboard and

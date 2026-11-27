@@ -2509,6 +2509,16 @@ for (const [name, cmd] of startCommands) {
   });
 }
 
+test("the unsandboxed line names the host sandbox's parallelism — one at a time by default, up to n with parallel (#742)", async () => {
+  const line = async (sandbox: unknown) => {
+    const { deps, errored } = makeDeps({ cfg: { ...makeDeps().deps.cfg, sandbox } as unknown as DispatchDeps["cfg"] });
+    await dispatch(parseArgs(["run", "101"]), deps);
+    return errored.find((e) => /unsandboxed/.test(e)) ?? "";
+  };
+  assert.match(await line(hostSandbox()), /one issue at a time/);
+  assert.match(await line(hostSandbox({ parallel: 2 })), /up to 2 issues at a time/);
+});
+
 test("a campaign child `run` on hostSandbox() never repeats the unsandboxed warning — the campaign printed it once (#492)", async () => {
   const { deps, errored } = makeDeps({
     isCampaignChild: true,

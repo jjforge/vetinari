@@ -9,6 +9,7 @@ import {
   agentFor,
   ensureMountSources,
   foreignWorktreeFor,
+  hostParallel,
   hostSandbox,
   makeSandbox,
   makeSandboxOptions,
@@ -190,6 +191,15 @@ test("hostSandbox() builds sandcastle's noSandbox provider, and usesHostSandbox 
   const fake = () => ({ name: "fake", env: {} }) as unknown as SandboxProvider;
   assert.equal(usesHostSandbox(sandboxCfg({ sandbox: fake })), false);
   assert.equal(indexHostSandbox, hostSandbox);
+});
+
+test("hostParallel reads hostSandbox({ parallel }), defaults a host sandbox to one, and is undefined off the host (#742)", () => {
+  assert.equal(hostParallel(sandboxCfg({ sandbox: hostSandbox({ parallel: 2 }) })), 2);
+  assert.equal(hostParallel(sandboxCfg({ sandbox: hostSandbox() })), 1);
+  assert.equal(hostParallel(sandboxCfg({ sandbox: () => noSandbox() })), 1);
+  assert.equal(hostParallel(sandboxCfg()), undefined);
+  assert.equal(hostParallel(sandboxCfg({ sandbox: () => ({ name: "fake", env: {} }) as unknown as SandboxProvider })), undefined);
+  for (const parallel of [0, -1, 1.5, Number.NaN]) assert.throws(() => hostSandbox({ parallel }), /parallel/);
 });
 
 test("with hostSandbox(), each run gets its own worktree and branch on the host, .env is injected, and the sandbox row says host (#492)", async () => {

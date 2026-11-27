@@ -156,11 +156,20 @@ function sandboxProvider(cfg: ResolvedConfig, mounts: MountSpec[]): sandcastle.S
  * The host sandbox (ADR 0028): a `sandbox` factory for sandcastle's `noSandbox()`, so the agent and
  * gates run directly on the host in the run's own worktree — for toolchains only macOS has (Xcode).
  * Opt-in only: nothing selects it but `sandbox: hostSandbox()` in the config, never a fallback.
+ * `parallel` is how many of the project's issues a campaign runs at once (default one); above one,
+ * the project must give each run its own simulator and caches.
  */
-export const hostSandbox = (): NonNullable<ResolvedConfig["sandbox"]> => () => noSandbox();
+export const hostSandbox = ({ parallel = 1 }: { parallel?: number } = {}): NonNullable<ResolvedConfig["sandbox"]> => {
+  if (!Number.isInteger(parallel) || parallel < 1) throw new Refusal(`hostSandbox: parallel must be a positive integer, got ${parallel}`);
+  return Object.assign(() => noSandbox(), { hostParallel: parallel });
+};
 
 /** Does this config run on the host? True for `hostSandbox()` and for a hand-written `() => noSandbox()`. */
 export const usesHostSandbox = (cfg: ResolvedConfig): boolean => cfg.sandbox?.(cfg, { mounts: [] }).name === "no-sandbox";
+
+/** How many issues a host-sandbox project runs at once — `hostSandbox({ parallel })`, else one; undefined off the host. */
+export const hostParallel = (cfg: ResolvedConfig): number | undefined =>
+  usesHostSandbox(cfg) ? ((cfg.sandbox as { hostParallel?: number }).hostParallel ?? 1) : undefined;
 
 /**
  * The bind mounts for this run's container: `cfg.mounts`, then the host worktrees dir

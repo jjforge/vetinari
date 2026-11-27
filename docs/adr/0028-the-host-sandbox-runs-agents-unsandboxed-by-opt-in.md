@@ -17,13 +17,19 @@ selects it with `sandbox: hostSandbox()` in `vetinari/config.mts`, and needs no 
   a fallback when Docker is missing. A hand-written `sandbox: () => noSandbox()` is
   treated the same way.
 - **Visible.** Every `campaign`, `redrive`, `run`, `answer` and `baseline` start prints
-  one `⚠ unsandboxed` line on stderr (not repeated by a campaign child). The `sandbox`
+  one `⚠ unsandboxed` line on stderr (not repeated by a campaign child), naming how many
+  issues run at once. The `sandbox`
   event row carries `sandbox: "host"`.
-- **One issue at a time.** A host-sandbox project's campaign declares a demand of at
-  most one slot, so it runs its waves one issue at a time, whatever the host ceiling.
-  Host agents share one set of simulators, DerivedData and caches, and parallel
-  `xcodebuild test` runs collide on them. Other projects keep the slots it does not
-  want. Two standalone `run`s started by hand are not held apart.
+- **One issue at a time by default, more by opt-in.** A host-sandbox project's campaign
+  declares a demand of at most `hostSandbox({ parallel })` slots, default one, whatever
+  the host ceiling. Host agents share the host's simulators, DerivedData and caches, and
+  parallel `xcodebuild test` runs collide on them, so one is the safe default. A project
+  that gives each run its own simulator and DerivedData (the user guide's recipe) may
+  raise `parallel`. On an M6 Mac mini (2 performance cores, 24 GB) two runs at once
+  gave 1.5× the throughput of one, and three were slower per run than two and failed
+  timing-sensitive tests under load: the limit is cores, not memory. Other projects
+  keep the slots it does not want. Two standalone `run`s started by hand are not held
+  apart.
 - **GNU `timeout` is required.** Every gate runs under `timeout`, which macOS does not
   ship. A host-sandbox start refuses, naming GNU coreutils, when `timeout` is not on
   PATH, rather than letting every gate exit 127.

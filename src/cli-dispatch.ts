@@ -51,7 +51,7 @@ import { formatBaseGateEstimate, makeReporter } from "./report.ts";
 import { pastBaseGates } from "./slow-gates.ts";
 import { Refusal } from "./refusal.ts";
 import { PARK_REASON_FACTS, campaignParkHold, recoverySentence, type ParkHoldCampaign } from "./park-reasons.ts";
-import { mountParentPaths, mountParentProblems, usesHostSandbox, type readMountParentOwners } from "./sandbox.ts";
+import { hostParallel, mountParentPaths, mountParentProblems, type readMountParentOwners } from "./sandbox.ts";
 import type { credentialsExposureWarning } from "./registry.ts";
 import { launch, reactToLiveCampaign } from "./launch.ts";
 
@@ -432,9 +432,11 @@ function checkBeforeLaunch(deps: DispatchDeps): void {
  * it every gate exits 127.
  */
 function warnIfUnsandboxed(deps: DispatchDeps): void {
-  if (!usesHostSandbox(deps.cfg)) return;
+  const parallel = hostParallel(deps.cfg);
+  if (!parallel) return;
+  const atOnce = parallel === 1 ? "one issue at a time" : `up to ${parallel} issues at a time`;
   deps.error(
-    "⚠ unsandboxed: the agent and gates run directly on this host, as your user, with your permissions and credentials, one issue at a time (ADR 0028)",
+    `⚠ unsandboxed: the agent and gates run directly on this host, as your user, with your permissions and credentials, ${atOnce} (ADR 0028)`,
   );
   if (!deps.hostHasTimeout())
     throw new Refusal(

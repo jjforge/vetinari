@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   gatewayServiceArgv,
-  gatewayServiceUnsupported,
   isGatewayServiceVerb,
+  launchdManager,
   runGatewayService,
   type GatewayServiceIO,
   type RunResult,
@@ -67,8 +67,12 @@ test("status delegates to systemctl's own output and propagates its exit code �
 });
 
 test("a failed start/stop propagates the verb's code and composes no success line", async () => {
-  for (const verb of ["start", "stop"] as const) {
-    const io = fakeIo({ probes: [{ code: 0 }], results: [{ code: 3 }] });
+  // Each from the state where the verb runs: start from stopped, stop from running.
+  for (const [verb, before] of [
+    ["start", 3],
+    ["stop", 0],
+  ] as const) {
+    const io = fakeIo({ probes: [{ code: before }], results: [{ code: 3 }] });
     const code = await runGatewayService(verb, io);
     assert.equal(code, 3, `${verb} should propagate systemctl's exit code`);
     assert.deepEqual(io.logs, [], `${verb} should not claim success over a failed verb`);
@@ -87,7 +91,7 @@ test("start when already running is a no-op: reports it and skips the resulting-
   const io = fakeIo({ probes: [{ code: 0 }], results: [{ code: 0 }] });
   const code = await runGatewayService("start", io);
   assert.equal(code, 0);
-  assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("start")]);
+  assert.deepEqual(io.calls, [gatewayServiceArgv("is-active")], "an already-running service is not started again");
   assert.deepEqual(io.logs, ["vetinari-gateway was already running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
@@ -110,7 +114,7 @@ test("stop when not running is a no-op: reports it, no resulting-state probe —
   const io = fakeIo({ probes: [{ code: 3 }], results: [{ code: 0 }] });
   const code = await runGatewayService("stop", io);
   assert.equal(code, 0);
-  assert.deepEqual(io.calls, [gatewayServiceArgv("is-active"), gatewayServiceArgv("stop")]);
+  assert.deepEqual(io.calls, [gatewayServiceArgv("is-active")], "a stopped service is not stopped again");
   assert.deepEqual(io.logs, ["vetinari-gateway wasn't running — nothing to do.\nlogs: journalctl --user -u vetinari-gateway"]);
 });
 
@@ -162,23 +166,41 @@ test("an absent systemctl (spawn ENOENT) exits non-zero rather than crashing", a
   assert.notEqual(code, 0);
 });
 
-// macOS has no systemd, so install and the lifecycle verbs refuse there with a pointer
-// to running the gateway in a terminal; bare `gateway` (the foreground daemon) never does.
-const MACOS_REFUSAL =
-  "vetinari gateway install/status/start/stop/restart need systemd, which macOS doesn't have. " +
-  "Run the gateway in a terminal instead: `vetinari gateway` (Telegram relay and dashboard), " +
-  "or `vetinari status` for the dashboard alone. It stops when that terminal closes.";
-const SERVICE_ARGS = [["install"], ["install", "--dry-run"], ["status"], ["start"], ["stop"], ["restart"]];
+// macOS runs the gateway as a launchd LaunchAgent: the verbs map onto launchctl against
+// the user's GUI domain, and messages point at the agent's log file, not journalctl.
+const mac = launchdManager(501, "/Users/u/Library/LaunchAgents/vetinari-gateway.plist", "/Users/u/Library/Logs/vetinari-gateway.log");
 
-test("gatewayServiceUnsupported: on darwin, install and every lifecycle verb refuse with the terminal pointer (#647)", () => {
-  for (const args of SERVICE_ARGS) assert.equal(gatewayServiceUnsupported("darwin", args), MACOS_REFUSAL, args.join(" "));
+test("launchd: each verb maps to launchctl in the gui/<uid> domain", () => {
+  assert.equal(mac.tool, "launchctl");
+  assert.deepEqual(mac.argv("start"), ["bootstrap", "gui/501", "/Users/u/Library/LaunchAgents/vetinari-gateway.plist"]);
+  assert.deepEqual(mac.argv("stop"), ["bootout", "gui/501/vetinari-gateway"]);
+  assert.deepEqual(mac.argv("restart"), ["kickstart", "-k", "gui/501/vetinari-gateway"]);
+  assert.deepEqual(mac.argv("status"), ["print", "gui/501/vetinari-gateway"]);
+  assert.deepEqual(mac.argv("is-active"), ["print", "gui/501/vetinari-gateway"]);
 });
 
-test("gatewayServiceUnsupported: on darwin, bare gateway and any other first token are not refused (#647)", () => {
-  assert.equal(gatewayServiceUnsupported("darwin", []), undefined);
-  assert.equal(gatewayServiceUnsupported("darwin", ["other"]), undefined);
+test("launchd: start when stopped bootstraps the agent and points at its log file", async () => {
+  const io = fakeIo({ probes: [{ code: 113 }, { code: 0 }], results: [{ code: 0 }] });
+  const code = await runGatewayService("start", io, mac);
+  assert.equal(code, 0);
+  assert.deepEqual(io.calls, [mac.argv("is-active"), mac.argv("start"), mac.argv("is-active")]);
+  assert.deepEqual(io.logs, ["started vetinari-gateway — now active.\nlogs: /Users/u/Library/Logs/vetinari-gateway.log"]);
 });
 
-test("gatewayServiceUnsupported: on linux nothing is refused (#647)", () => {
-  for (const args of [...SERVICE_ARGS, [], ["other"]]) assert.equal(gatewayServiceUnsupported("linux", args), undefined, args.join(" "));
+test("launchd: start when loaded never bootstraps again (launchctl would fail on a loaded job)", async () => {
+  const io = fakeIo({ probes: [{ code: 0 }] });
+  assert.equal(await runGatewayService("start", io, mac), 0);
+  assert.deepEqual(io.calls, [mac.argv("is-active")]);
+});
+
+test("launchd: a service that came back inactive points at the log file, not journalctl", async () => {
+  const io = fakeIo({ results: [{ code: 0 }], probes: [{ code: 113 }] });
+  assert.equal(await runGatewayService("restart", io, mac), 113);
+  assert.deepEqual(io.logs, ["restarted vetinari-gateway — but it is not active; see /Users/u/Library/Logs/vetinari-gateway.log"]);
+});
+
+test("launchd: an uninstalled agent exits non-zero without shelling launchctl", async () => {
+  const io = fakeIo({ installed: false });
+  assert.notEqual(await runGatewayService("status", io, mac), 0);
+  assert.deepEqual(io.calls, []);
 });

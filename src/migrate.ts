@@ -260,9 +260,11 @@ export function systemdQuoteArg(arg: string): string {
  * so the same host re-resolves the same line (an idempotent rewrite).
  */
 export function resolveGatewayExecStart(launch: LaunchSelf): string {
-  const argv = [launch.execPath, ...launch.execArgv, launch.argv1, "gateway"];
-  return `ExecStart=${argv.map(systemdQuoteArg).join(" ")}`;
+  return `ExecStart=${gatewayArgv(launch).map(systemdQuoteArg).join(" ")}`;
 }
+
+/** The absolute gateway command both service managers run: node, its tsx loader flags, this CLI, `gateway`. */
+const gatewayArgv = (launch: LaunchSelf): string[] => [launch.execPath, ...launch.execArgv, launch.argv1, "gateway"];
 
 /**
  * The host-level gateway systemd unit: no `WorkingDirectory` (it fronts every
@@ -292,6 +294,72 @@ function gatewayUnit(execStart: string): string {
   ].join("\n");
 }
 
+/** Escape a value for a plist `<string>`. */
+const xmlEscape = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The variables the macOS gateway agent carries from the shell that installed it. launchd
+ * starts an agent with a bare system PATH, but the gateway shells campaigns, answers and
+ * redrives, whose host-sandbox agents and gates need the operator's tools (claude, git, gh,
+ * GNU timeout, xcodebuild). So PATH is captured, and with it any set variable the gateway
+ * itself reads: the dashboard's bind, port and allowed hosts, and the host container
+ * ceiling. Nothing secret — the gateway reads each project's credentials from its base
+ * location (ADR 0002). Pure.
+ */
+export function gatewayLaunchAgentEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const keys = [
+    "PATH",
+    "VETINARI_STATUS_ALLOWED_HOSTS",
+    "VETINARI_GATEWAY_STATUS_HOST",
+    "VETINARI_GATEWAY_STATUS_PORT",
+    "MAX_CONCURRENT_CONTAINERS",
+  ];
+  return Object.fromEntries(keys.filter((k) => env[k]).map((k) => [k, env[k]!]));
+}
+
+/**
+ * The host-level gateway LaunchAgent plist (macOS), the launchd counterpart of the
+ * systemd unit: the same absolute gateway command, started at login (`RunAtLoad`) and
+ * restarted whenever it exits (`KeepAlive`), with stdout and stderr in `logPath`.
+ * `AbandonProcessGroup`, like the unit's `KillMode=process`, leaves the campaigns,
+ * answers and prunes it launched running when the agent is stopped or restarted.
+ * Deterministic in its inputs.
+ */
+export function gatewayLaunchAgent(launch: LaunchSelf, env: Record<string, string>, logPath: string): string {
+  const str = (v: string) => `<string>${xmlEscape(v)}</string>`;
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    "<dict>",
+    "  <key>Label</key>",
+    `  ${str("vetinari-gateway")}`,
+    "  <key>ProgramArguments</key>",
+    "  <array>",
+    ...gatewayArgv(launch).map((a) => `    ${str(a)}`),
+    "  </array>",
+    "  <key>EnvironmentVariables</key>",
+    "  <dict>",
+    ...Object.entries(env).flatMap(([k, v]) => [`    <key>${xmlEscape(k)}</key>`, `    ${str(v)}`]),
+    "  </dict>",
+    "  <key>RunAtLoad</key>",
+    "  <true/>",
+    "  <key>KeepAlive</key>",
+    "  <true/>",
+    "  <key>ThrottleInterval</key>",
+    "  <integer>5</integer>",
+    "  <key>AbandonProcessGroup</key>",
+    "  <true/>",
+    "  <key>StandardOutPath</key>",
+    `  ${str(logPath)}`,
+    "  <key>StandardErrorPath</key>",
+    `  ${str(logPath)}`,
+    "</dict>",
+    "</plist>",
+    "",
+  ].join("\n");
+}
+
 /** Read how this process was launched — the edge IO behind the pure ExecStart resolver. */
 export function currentLaunchSelf(): LaunchSelf {
   return { execPath: process.execPath, execArgv: process.execArgv, argv1: process.argv[1] };
@@ -304,6 +372,11 @@ export function currentLaunchSelf(): LaunchSelf {
  */
 export function resolvedGatewayUnit(): string {
   return gatewayUnit(resolveGatewayExecStart(currentLaunchSelf()));
+}
+
+/** The resolved gateway LaunchAgent for THIS install, carrying this shell's PATH and gateway settings. */
+export function resolvedGatewayLaunchAgent(): string {
+  return gatewayLaunchAgent(currentLaunchSelf(), gatewayLaunchAgentEnv(process.env), gatewayLogPath());
 }
 
 /** Write a resolved gateway unit to `path`, creating its parent dir — the `gateway install` edge IO. */
@@ -323,4 +396,14 @@ export function systemdUnitPath(): string {
   if (override) return override;
   const xdg = process.env.XDG_CONFIG_HOME;
   return join(xdg || join(homedir(), ".config"), "systemd", "user", "vetinari-gateway.service");
+}
+
+/** Where the macOS gateway LaunchAgent lives; `VETINARI_LAUNCH_AGENT` overrides it, as `VETINARI_SYSTEMD_UNIT` does the unit. */
+export function launchAgentPath(): string {
+  return process.env.VETINARI_LAUNCH_AGENT || join(homedir(), "Library", "LaunchAgents", "vetinari-gateway.plist");
+}
+
+/** Where the macOS gateway agent writes its stdout and stderr. */
+export function gatewayLogPath(): string {
+  return join(homedir(), "Library", "Logs", "vetinari-gateway.log");
 }

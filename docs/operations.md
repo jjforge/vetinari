@@ -339,10 +339,38 @@ These wrap `systemctl --user … vetinari-gateway`; gateway detail goes to
 `journalctl --user -u vetinari-gateway`. Do not also run an inline `gateway &`,
 or the two consumers fight over the bot's updates.
 
-**On macOS** there is no systemd, so `gateway install` and the `status|start|stop|restart`
-verbs refuse (exit `4`) with a pointer instead of writing a unit nothing reads. Run
-`vetinari gateway` in a terminal (Telegram relay and dashboard), or `vetinari status` for
-the dashboard alone; either stops when that terminal closes.
+### On macOS: a launchd LaunchAgent
+
+macOS has no systemd, so on a Mac the same commands manage a **launchd LaunchAgent**
+instead:
+
+```bash
+# set anything the dashboard needs first, e.g. VETINARI_STATUS_ALLOWED_HOSTS
+vetinari gateway install    # --dry-run to print the plist and write nothing
+vetinari gateway start      # now; it also starts at every login
+```
+
+`gateway install` writes `~/Library/LaunchAgents/vetinari-gateway.plist`, running the
+same absolute `node` + tsx-loader + CLI command as the unit, with `RunAtLoad` (start at
+login) and `KeepAlive` (restart whenever it exits). Its output goes to
+`~/Library/Logs/vetinari-gateway.log`. `AbandonProcessGroup` plays the part of
+`KillMode=process`: stopping or restarting the agent leaves the campaigns, answers and
+prunes it launched running.
+
+Unlike the systemd unit, the plist **carries this shell's `PATH`**. launchd starts an
+agent with a bare system `PATH`, and the gateway shells campaigns and answers whose
+host-sandbox agents and gates need your tools (`claude`, `git`, `gh`, GNU `timeout`,
+`xcodebuild`). It also carries any of `VETINARI_STATUS_ALLOWED_HOSTS`,
+`VETINARI_GATEWAY_STATUS_HOST`, `VETINARI_GATEWAY_STATUS_PORT` and
+`MAX_CONCURRENT_CONTAINERS` set when you run it. These are pinned, so **re-run `gateway
+install` and then `gateway restart`** after a node or tsx upgrade, or to change any of
+them.
+
+The verbs wrap `launchctl` in your GUI domain: `start` is `bootstrap`, `stop` is
+`bootout` (which unloads the agent until the next `gateway start` or login), `restart`
+is `kickstart -k`, and `status` is `launchctl print gui/<uid>/vetinari-gateway`. As on
+Linux, do not also run a `vetinari gateway` in a terminal: two gateways fight over the
+bot's updates.
 
 ### Verifying the round-trip
 

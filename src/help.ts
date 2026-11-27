@@ -101,26 +101,27 @@ export const MODES: Mode[] = [
   {
     signature: "gateway install [--dry-run]",
     blurb:
-      "write the host-level systemd unit for THIS install to ~/.config/systemd/user/vetinari-gateway.service, with a fully absolute node + tsx-loader + cli ExecStart — no bash -lc, env, npx, or PATH dependency, so it starts under systemd's clean environment (fixes the nvm/fnm/mise/asdf crash-loop). Re-run after a node/tsx upgrade (--dry-run to print the unit and write nothing). Linux (systemd) only — on macOS it refuses with a pointer to running `vetinari gateway` in a terminal",
+      "write the host-level systemd unit for THIS install to ~/.config/systemd/user/vetinari-gateway.service, with a fully absolute node + tsx-loader + cli ExecStart — no bash -lc, env, npx, or PATH dependency, so it starts under systemd's clean environment (fixes the nvm/fnm/mise/asdf crash-loop). Re-run after a node/tsx upgrade (--dry-run to print the unit and write nothing). On macOS it writes a launchd LaunchAgent instead, ~/Library/LaunchAgents/vetinari-gateway.plist — the same absolute command, started at login and kept alive, carrying this shell's PATH and gateway settings (VETINARI_STATUS_ALLOWED_HOSTS, the dashboard bind/port, MAX_CONCURRENT_CONTAINERS), logging to ~/Library/Logs/vetinari-gateway.log",
   },
   {
     signature: "gateway status",
     blurb:
-      "show whether the host gateway service is running — wraps `systemctl --user status vetinari-gateway --no-pager` and propagates its exit code. A missing/uninstalled service (or absent systemctl) points you at `gateway install` rather than a raw failure. Linux (systemd) only — refuses on macOS",
+      "show whether the host gateway service is running — wraps `systemctl --user status vetinari-gateway --no-pager` and propagates its exit code. A missing/uninstalled service (or absent systemctl) points you at `gateway install` rather than a raw failure. On macOS it wraps `launchctl print gui/<uid>/vetinari-gateway`",
   },
   {
     signature: "gateway start",
     blurb:
-      "start the host gateway service — `systemctl --user start vetinari-gateway` (the unit `gateway install` wrote). Linux (systemd) only — refuses on macOS",
+      "start the host gateway service — `systemctl --user start vetinari-gateway` (the unit `gateway install` wrote); on macOS `launchctl bootstrap` of the LaunchAgent",
   },
   {
     signature: "gateway stop",
-    blurb: "stop the host gateway service — `systemctl --user stop vetinari-gateway`. Linux (systemd) only — refuses on macOS",
+    blurb:
+      "stop the host gateway service — `systemctl --user stop vetinari-gateway`; on macOS `launchctl bootout`, which unloads the agent until the next `gateway start` or login",
   },
   {
     signature: "gateway restart",
     blurb:
-      "restart the host gateway service so it serves the current code (tsx compiles at startup, so a restart is how merged changes go live) — `systemctl --user restart vetinari-gateway`, then reports is-active. Linux (systemd) only — refuses on macOS",
+      "restart the host gateway service so it serves the current code (tsx compiles at startup, so a restart is how merged changes go live) — `systemctl --user restart vetinari-gateway`, then reports is-active; on macOS `launchctl kickstart -k`",
   },
   {
     signature: "host log [-n <count>] [--tail] [--json]",
